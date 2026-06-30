@@ -12,9 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Windows Driver Kit (WDK) via Chocolatey
+      - name: Install WDK via winget
         shell: powershell
-        run: choco install windowsdriverkit -y
+        run: |
+          winget install --id Microsoft.WindowsDriverKit -e --accept-source-agreements --accept-package-agreements --silent
 
       - name: Build driver (Release x64)
         run: msbuild TestDriver.sln /p:Configuration=Release /p:Platform=x64 /v:minimal
