@@ -12,39 +12,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Windows Driver Kit (WDK)
+      - name: Install WDK
         shell: powershell
         run: |
           $url = "https://go.microsoft.com/fwlink/?linkid=2166289"
           $installer = "$env:TEMP\wdksetup.exe"
           Invoke-WebRequest -Uri $url -OutFile $installer
           Start-Process -FilePath $installer -ArgumentList "/quiet /norestart" -Wait
+          # Проверяем, что папки создались
+          Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" -Directory | Select-Object Name
+          Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" -Directory | Select-Object Name
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Locate WDK include and lib folders
+      - name: Find WDK version
         shell: powershell
         run: |
-          $wdkRoot = "C:\Program Files (x86)\Windows Kits\10"
-          $includeDir = Get-ChildItem "$wdkRoot\Include" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $libDir = Get-ChildItem "$wdkRoot\Lib" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          if (-not $includeDir -or -not $libDir) {
-            Write-Error "Could not find WDK directories"
-            exit 1
-          }
-          "WDK_INCLUDE=$($includeDir.FullName)\km" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "WDK_LIB=$($libDir.FullName)\km\x64" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "WDK_INCLUDE=$($includeDir.FullName)\km"
-          Write-Host "WDK_LIB=$($libDir.FullName)\km\x64"
+          $includeDir = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $libDir = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $includeDir -or -not $libDir) { Write-Error "WDK not found"; exit 1 }
+          "WDK_INC=$($includeDir.FullName)\km" >> $env:GITHUB_ENV
+          "WDK_LIB=$($libDir.FullName)\km\x64" >> $env:GITHUB_ENV
 
-      - name: Build driver (Release x64)
-        shell: powershell
+      - name: Build driver
+        shell: cmd
         run: |
-          msbuild TestDriver.sln /p:Configuration=Release /p:Platform=x64 /p:WDK_INCLUDE="$env:WDK_INCLUDE" /p:WDK_LIB="$env:WDK_LIB" /v:minimal
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl.exe /c /I"%WDK_INC%" /DWIN32=100 /D_WIN32_WINNT=0x0A00 /DNTDDI_VERSION=0x0A000000 /Gd- /GS- /Gy- /Oi- /Oy- /Ob2 /O2 /Os /Gm- /TC driver.c /Fodriver.obj
+          link.exe /DRIVER /NODEFAULTLIB /SUBSYSTEM:NATIVE /ENTRY:DriverEntry /OUT:TestDriver.sys driver.obj ntoskrnl.lib hal.lib /LIBPATH:"%WDK_LIB%"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TestDriver
-          path: x64\Release\TestDriver.sys
+          path: TestDriver.sys
