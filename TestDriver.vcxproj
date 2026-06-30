@@ -28,7 +28,6 @@
     <OutDir>$(SolutionDir)x64\Release\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>TestDriver</TargetName>
-    <!-- Явные пути к WDK (версия 10.0.22621.0) -->
     <IncludePath>$(VC_IncludePath);C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\km</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\km\x64</LibraryPath>
   </PropertyGroup>
@@ -48,4 +47,5 @@
   <ItemGroup>
     <ClCompile Include="driver.c" />
   </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
