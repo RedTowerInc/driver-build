@@ -20,6 +20,9 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $installer
           Start-Process -FilePath $installer -ArgumentList "/quiet /norestart" -Wait
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Build driver (Release x64)
         run: msbuild TestDriver.sln /p:Configuration=Release /p:Platform=x64 /v:minimal
 
