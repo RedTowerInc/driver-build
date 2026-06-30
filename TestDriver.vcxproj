@@ -28,21 +28,22 @@
     <OutDir>$(SolutionDir)x64\Release\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>TestDriver</TargetName>
-    <!-- Пути к WDK задаются через свойства WDK_INCLUDE и WDK_LIB, которые передаются из msbuild -->
-    <IncludePath>$(VC_IncludePath);$(WDK_INCLUDE)</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x64);$(WDK_LIB)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <ExceptionHandling>false</ExceptionHandling>
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalOptions>/Qspectre- /TC %(AdditionalOptions)</AdditionalOptions>
+      <!-- Путь к заголовкам WDK подставляется из свойства WDK_INCLUDE (передаётся через /p) -->
+      <AdditionalIncludeDirectories>$(WDK_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Native</SubSystem>
       <AdditionalDependencies>ntoskrnl.lib;hal.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>DriverEntry</EntryPointSymbol>
       <Driver>true</Driver>
+      <!-- Путь к библиотекам WDK -->
+      <AdditionalLibraryDirectories>$(WDK_LIB);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
