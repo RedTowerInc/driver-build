@@ -12,10 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install WDK via winget
+      - name: Install Windows Driver Kit (WDK)
         shell: powershell
         run: |
-          winget install --id Microsoft.WindowsDriverKit -e --accept-source-agreements --accept-package-agreements --silent
+          $url = "https://go.microsoft.com/fwlink/?linkid=2166289"
+          $installer = "$env:TEMP\wdksetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/quiet /norestart" -Wait
 
       - name: Build driver (Release x64)
         run: msbuild TestDriver.sln /p:Configuration=Release /p:Platform=x64 /v:minimal
