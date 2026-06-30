@@ -28,8 +28,9 @@
     <OutDir>$(SolutionDir)x64\Release\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>TestDriver</TargetName>
-    <IncludePath>$(VC_IncludePath);C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\km</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x64);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\km\x64</LibraryPath>
+    <!-- Пути к WDK задаются через свойства WDK_INCLUDE и WDK_LIB, которые передаются из msbuild -->
+    <IncludePath>$(VC_IncludePath);$(WDK_INCLUDE)</IncludePath>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WDK_LIB)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
