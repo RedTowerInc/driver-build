@@ -12,15 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install WDK
+      - name: Install Windows Driver Kit (WDK) via Chocolatey
         shell: powershell
-        run: |
-          $url = "https://go.microsoft.com/fwlink/?linkid=2244371"
-          $installer = "$env:TEMP\wdksetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "/quiet /norestart" -Wait
+        run: choco install windowsdriverkit -y
 
-      - name: Build driver
+      - name: Build driver (Release x64)
         run: msbuild TestDriver.sln /p:Configuration=Release /p:Platform=x64 /v:minimal
 
       - name: Upload artifact
