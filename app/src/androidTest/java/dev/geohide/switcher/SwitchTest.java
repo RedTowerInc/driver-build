@@ -34,6 +34,7 @@ public class SwitchTest {
     private void click(String id)throws Exception{
         UiObject2 v=device.wait(Until.findObject(By.res(PKG,id)),4000);assertNotNull(id,v);v.click();device.waitForIdle();
     }
+    private void tap(int id){ins.runOnMainSync(()->{Activity live=ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).iterator().next();assertTrue(live.findViewById(id).performClick());});}
     private void grant()throws Exception{
         UiObject2 yes=device.wait(Until.findObject(By.res("android","button1")),4000);
         if(yes!=null)yes.click();
@@ -99,10 +100,11 @@ public class SwitchTest {
         waitNoVpn();screenshot("03-off-after-stop");
         for(int i=0;i<5;i++){click("power");waitState(DnsVpnService.State.ON);click("power");waitState(DnsVpnService.State.OFF);}
         // Cancelling an unanswered startup must be immediate and never reconnect later.
-        silent=true;click("power");waitState(DnsVpnService.State.STARTING);long start=System.currentTimeMillis();click("force_stop");waitState(DnsVpnService.State.OFF);
+        silent=true;tap(R.id.power);waitState(DnsVpnService.State.STARTING);long start=System.currentTimeMillis();tap(R.id.force_stop);waitState(DnsVpnService.State.OFF);
         assertTrue(System.currentTimeMillis()-start<2000);Thread.sleep(1200);assertEquals(DnsVpnService.State.OFF,DnsVpnService.current().state);waitNoVpn();
+        // Verify the separate force-stop button through the physical UI as well.
+        silent=false;click("power");waitState(DnsVpnService.State.ON);click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         // Rapid clicks cannot leave stale state or a VPN after forced stop.
-        silent=false;
         ins.runOnMainSync(()->{Activity live=ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).iterator().next();View v=live.findViewById(R.id.power);for(int i=0;i<20;i++)v.performClick();});
         click("force_stop");waitState(DnsVpnService.State.OFF);Thread.sleep(500);waitNoVpn();
         click("power");waitState(DnsVpnService.State.ON);
