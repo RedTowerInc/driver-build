@@ -1,2 +1,22 @@
 plugins { id 'com.android.application' }
-android { namespace 'dev.geohide.switcher'; compileSdk 35; defaultConfig { applicationId 'dev.geohide.switcher'; minSdk 28; targetSdk 34; versionCode 1; versionName '1.0.1' }; compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 } }
+android {
+    namespace 'dev.geohide.switcher'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.geohide.switcher'
+        minSdk 28
+        targetSdk 35
+        versionCode 20000
+        versionName '2.0.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+}

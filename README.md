@@ -1,1 +1,10 @@
-GeoHide Switch Android: DNS-only local VPN. Source variant for GitHub build. Press to enable/disable. The app uses the single Android VPN slot.\n
+# GeoHide Switch 2.0
+Исправление существующего проекта 1.0.1. Android 9+, Java 17, SDK 35, Gradle 8.11.1.
+Точное ТЗ: SPEC_RU.md. Проверки: app/src/test и app/src/androidTest.
+
+Установка: открыть APK. Если Android сообщает о конфликте подписи с 1.0.1, сначала удалить старую версию. Это debug-сборка; она подписана новым ключом сборочного окружения.
+Первое включение требует стандартного разрешения Android VPN. Приложение занимает один VPN-слот.
+
+Сборка: `gradle :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`.
+CI дополнительно запускает инструментальный тест на Android 15 (API 35).
+Успех тестов с локальным DNS-стендом не доказывает доступность GeoHide у конкретного оператора.

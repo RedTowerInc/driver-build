@@ -1,124 +1,161 @@
 package dev.geohide.switcher;
+
 import android.app.*;
-import android.content.Intent;
-import android.net.VpnService;
+import android.content.*;
+import android.net.*;
 import android.os.*;
+import android.system.OsConstants;
+import android.system.Os;
+import android.system.ErrnoException;
 import java.io.*;
-import java.net.*;
-import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class DnsVpnService extends VpnService {
-    public static volatile boolean active=false;
-    private static final String[] GEO={"193.233.112.68","193.233.112.88","159.194.200.33","45.155.204.190","37.230.192.51","46.8.158.6"};
-    private ParcelFileDescriptor tun;
-    private volatile boolean running=false;
-    private ExecutorService workers;
-    private FileOutputStream output;
-    private final Object writeLock=new Object();
-    private final AtomicInteger id=new AtomicInteger(1),preferred=new AtomicInteger(0);
-    private static int u16(byte[] b,int x){return ((b[x]&255)<<8)|(b[x+1]&255);}
-    private static void p16(byte[] b,int x,int n){b[x]=(byte)(n>>>8);b[x+1]=(byte)n;}
-    private static long sum(byte[] b,int off,int len,long s){
-        for(int i=0;i<len;i+=2) s+=((b[off+i]&255)<<8)|((i+1<len)?(b[off+i+1]&255):0);
-        return s;
+    enum State { OFF, STARTING, ON, WAITING, ERROR }
+    static final class Snapshot {
+        final State state;final String detail,server;final long answered,failed;
+        Snapshot(State s,String d,String ip,long a,long f){state=s;detail=d;server=ip;answered=a;failed=f;}
     }
-    private static int checksum(long s){while((s>>>16)!=0)s=(s&65535)+(s>>>16);return (int)(~s)&65535;}
-    @Override public int onStartCommand(Intent intent,int flags,int startId) {
-        if(running)return START_STICKY;
-        NotificationManager nm=getSystemService(NotificationManager.class);
-        NotificationChannel chan=new NotificationChannel("geo","GeoHide DNS",NotificationManager.IMPORTANCE_LOW);
-        nm.createNotificationChannel(chan);
-        PendingIntent click=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE);
-        Notification note=new Notification.Builder(this,"geo").setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("GeoHide DNS").setContentText("DNS-туннель включён").setOngoing(true).setContentIntent(click).build();
-        startForeground(1203,note);
-        try {
-            tun=new Builder().setSession("GeoHide DNS").setMtu(1500)
-                .addAddress("10.77.77.2",32).addDnsServer("10.77.77.1").addRoute("10.77.77.1",32).establish();
-            if(tun==null)throw new IOException("VPN rejected");
-            output=new FileOutputStream(tun.getFileDescriptor());
-            running=true;active=true;
-            workers=new ThreadPoolExecutor(3,6,20,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(100),
-                new ThreadPoolExecutor.DiscardPolicy());
-            new Thread(this::read,"GeoHide-TUN").start();
-        }catch(Exception e){stopSelf();}
-        return START_STICKY;
+    private static volatile Snapshot snapshot=new Snapshot(State.OFF,"Нажмите, чтобы включить DNS","",0,0);
+    static Snapshot current(){return snapshot;}
+    static void clearError(){if(snapshot.state==State.ERROR)snapshot=new Snapshot(State.OFF,"DNS отключён","",0,0);}
+    // Package-private injection, only used by instrumentation in the same process.
+    static volatile String[] testServers;
+    static volatile int testPort=53;
+    private final Handler main=new Handler(Looper.getMainLooper());
+    private Session session;
+    static DnsVpnService instance;
+    private ConnectivityManager cm;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private static final int NOTE=1203;
+    private long answered,failed;
+    private static final class Session {
+        final DnsUpstream upstream;
+        final ExecutorService workers=new ThreadPoolExecutor(4,4,0,TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(64),new ThreadPoolExecutor.AbortPolicy());
+        final ScheduledExecutorService health=Executors.newSingleThreadScheduledExecutor();
+        final Object writeLock=new Object();
+        final AtomicInteger id=new AtomicInteger(1);
+        volatile boolean cancelled;
+        ParcelFileDescriptor tun;
+        FileInputStream input;
+        FileOutputStream output;
+        Thread reader;
+        Session(DnsUpstream u){upstream=u;}
+        void close(){
+            cancelled=true;upstream.close();health.shutdownNow();workers.shutdownNow();
+            if(reader!=null)reader.interrupt();
+            // The descriptor has exactly one owner. Reader/writers never close wrappers.
+            synchronized(writeLock){if(tun!=null)try{tun.close();}catch(IOException ignored){}tun=null;}
+        }
     }
-    private void read() {
-        try(FileInputStream in=new FileInputStream(tun.getFileDescriptor())){
-            byte[] b=new byte[32768];
-            while(running){
-                int n=in.read(b);if(n<29)continue;
-                int ihl=(b[0]&15)*4;
-                if((b[0]>>>4)!=4 || ihl<20 || n<ihl+8 || (b[9]&255)!=17)continue;
-                int total=u16(b,2), len=u16(b,ihl+4);
-                if(total>n || total<ihl+8 || len<8 || ihl+len>total || u16(b,ihl+2)!=53)continue;
-                if((u16(b,6)&0x3fff)!=0)continue;
-                byte[] head=Arrays.copyOf(b,ihl);
-                byte[] udp=Arrays.copyOfRange(b,ihl,ihl+8);
-                byte[] q=Arrays.copyOfRange(b,ihl+8,ihl+len);
-                if(q.length<12)continue;
-                workers.execute(()->forward(head,udp,q));
+    @Override public void onCreate(){super.onCreate();instance=this;cm=getSystemService(ConnectivityManager.class);}
+    @Override public int onStartCommand(Intent intent,int flags,int startId){
+        if(intent==null || "STOP".equals(intent.getAction())){disconnect(State.OFF,"DNS отключён");return START_NOT_STICKY;}
+        if(session!=null)return START_NOT_STICKY;
+        answered=failed=0;
+        try{
+            notification("Подключение…");
+            if(VpnService.prepare(this)!=null)throw new IOException("Разрешение VPN не предоставлено");
+            String[] servers=BuildConfig.DEBUG && testServers!=null?testServers:DnsUpstream.SERVERS;
+            int port=BuildConfig.DEBUG && testServers!=null?testPort:53;
+            Session s=new Session(new DnsUpstream(new DnsUpstream.Protector(){
+                public boolean udp(java.net.DatagramSocket x){return protect(x);}
+                public boolean tcp(java.net.Socket x){return protect(x);}
+            },servers,port));
+            session=s;publish(State.STARTING,"Проверяем ответ GeoHide…");
+            s.workers.execute(()->{
+                try{
+                    byte[] r=s.upstream.resolve(DnsPackets.probe(0x6e01));
+                    if((r[3]&15)!=0 || DnsPackets.u16(r,6)==0)throw new IOException("Проверочный домен GeoHide не разрешается");
+                    main.post(()->establish(s));
+                }catch(Exception e){main.post(()->{if(session==s)disconnect(State.ERROR,message(e));});}
+            });
+        }catch(Exception e){disconnect(State.ERROR,message(e));}
+        return START_NOT_STICKY;
+    }
+    private void establish(Session s){
+        if(session!=s || s.cancelled)return;
+        try{
+            s.tun=new Builder().setSession("GeoHide DNS").setMtu(1500).setBlocking(false)
+                .addAddress("10.77.77.2",32).addDnsServer("10.77.77.1").addRoute("10.77.77.1",32)
+                .allowFamily(OsConstants.AF_INET6).establish();
+            if(s.tun==null)throw new IOException("Android отклонил подключение VPN");
+            s.input=new FileInputStream(s.tun.getFileDescriptor());s.output=new FileOutputStream(s.tun.getFileDescriptor());
+            s.reader=new Thread(()->read(s),"GeoHide-TUN");s.reader.start();
+            networkCallback=new ConnectivityManager.NetworkCallback(){
+                @Override public void onAvailable(Network n){main.post(()->checkNetwork(s));}
+                @Override public void onLost(Network n){main.post(()->checkNetwork(s));}
+                @Override public void onCapabilitiesChanged(Network n,NetworkCapabilities c){main.post(()->checkNetwork(s));}
+            };
+            cm.registerNetworkCallback(new NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(),networkCallback);
+            publish(State.ON,"GeoHide отвечает · DNS включён");
+            s.health.scheduleWithFixedDelay(()->probe(s),15,15,TimeUnit.SECONDS);
+        }catch(Exception e){disconnect(State.ERROR,message(e));}
+    }
+    private void checkNetwork(Session s){
+        if(session!=s || s.cancelled)return;
+        // A new socket chooses the current underlying network; no old persistent sockets.
+        try{s.health.execute(()->probe(s));}catch(RejectedExecutionException ignored){}
+    }
+    private void probe(Session s){
+        try{byte[] r=s.upstream.resolve(DnsPackets.probe(0x6e02));
+            if((r[3]&15)!=0 || DnsPackets.u16(r,6)==0)throw new IOException("Нет ответа на проверочный домен");
+            main.post(()->{if(session==s)publish(State.ON,"GeoHide отвечает · DNS включён");});
+        }catch(IOException e){main.post(()->{if(session==s)publish(State.WAITING,"Нет ответа DNS. Можно отключить или дождаться сети.");});}
+    }
+    private void read(Session s){
+        byte[] b=new byte[65535];
+        try{
+            while(!s.cancelled){
+                int n;
+                try{n=Os.read(s.tun.getFileDescriptor(),b,0,b.length);}
+                catch(ErrnoException e){if(e.errno==OsConstants.EAGAIN || e.errno==OsConstants.EINTR){Thread.sleep(20);continue;}throw e;}
+                if(n<=0){Thread.sleep(20);continue;}
+                DnsPackets.Query q=DnsPackets.parse(b,n);if(q==null)continue;
+                try{s.workers.execute(()->forward(s,q));}
+                catch(RejectedExecutionException e){write(s,q,DnsPackets.failure(q.dns));}
             }
-        }catch(Exception ignored){}finally{stopSelf();}
+        }catch(Exception e){main.post(()->{if(session==s && !s.cancelled)disconnect(State.ERROR,"Ошибка DNS-туннеля: "+message(e));});}
     }
-    private void forward(byte[] head,byte[] udp,byte[] q) {
-        byte[] response=null;
-        int start=Math.floorMod(preferred.get(),GEO.length);
-        for(int x=0;running && x<GEO.length;x++){
-            int idx=(start+x)%GEO.length;
-            try(DatagramSocket sock=new DatagramSocket()){
-                if(!protect(sock))break;
-                sock.setSoTimeout(x==0?1200:900);
-                sock.connect(InetAddress.getByName(GEO[idx]),53);
-                sock.send(new DatagramPacket(q,q.length));
-                byte[] r=new byte[8192];
-                DatagramPacket pkt=new DatagramPacket(r,r.length);
-                sock.receive(pkt);
-                if(pkt.getLength()>=12 && r[0]==q[0] && r[1]==q[1] && (r[2]&128)!=0){
-                    response=Arrays.copyOf(r,pkt.getLength());preferred.set(idx);break;
-                }
-            }catch(Exception ignored){}
-        }
-        if(response==null || !running)return;
-        try{reply(head,udp,response);}catch(Exception ignored){}
+    private void forward(Session s,DnsPackets.Query q){
+        byte[] r;
+        try{r=s.upstream.resolve(q.dns);
+            main.post(()->{if(session==s){answered++;publish(State.ON,"GeoHide отвечает · DNS включён");}});
+        }catch(IOException e){r=DnsPackets.failure(q.dns);
+            main.post(()->{if(session==s){failed++;publish(State.WAITING,"Нет ответа DNS. Можно отключить или дождаться сети.");}});}
+        write(s,q,r);
     }
-    private void reply(byte[] request,byte[] reqUdp,byte[] dns)throws IOException{
-        int udpLen=8+dns.length;
-        byte[] full=new byte[udpLen];
-        p16(full,0,u16(reqUdp,2));p16(full,2,u16(reqUdp,0));
-        p16(full,4,udpLen);System.arraycopy(dns,0,full,8,dns.length);
-        long s=0;
-        for(int i=16;i<20;i+=2)s+=u16(request,i);
-        for(int i=12;i<16;i+=2)s+=u16(request,i);
-        s+=17+udpLen;
-        int cs=checksum(sum(full,0,full.length,s));
-        p16(full,6,cs==0?65535:cs);
-        int identity=id.getAndIncrement()&65535;
-        for(int ofs=0;ofs<full.length && running;){
-            int chunk=Math.min(1480,full.length-ofs);
-            if(ofs+chunk<full.length)chunk&=~7;
-            byte[] packet=new byte[20+chunk];
-            packet[0]=0x45;packet[8]=64;packet[9]=17;
-            p16(packet,2,packet.length);p16(packet,4,identity);p16(packet,6,ofs/8);
-            System.arraycopy(request,16,packet,12,4);
-            System.arraycopy(request,12,packet,16,4);
-            if(ofs+chunk<full.length)p16(packet,6,(ofs/8)|0x2000);
-            p16(packet,10,checksum(sum(packet,0,20,0)));
-            System.arraycopy(full,ofs,packet,20,chunk);
-            synchronized(writeLock){if(running && output!=null)output.write(packet);}
-            ofs+=chunk;
-        }
+    private void write(Session s,DnsPackets.Query q,byte[] dns){
+        if(dns==null || s.cancelled)return;
+        try{synchronized(s.writeLock){if(s.cancelled || s.tun==null)return;
+            for(byte[] p:DnsPackets.replies(q,dns,s.id.incrementAndGet()))s.output.write(p);}}
+        catch(IOException e){main.post(()->{if(session==s)disconnect(State.ERROR,"Не удалось отправить DNS-ответ");});}
     }
-    @Override public void onDestroy(){
-        running=false;active=false;
-        if(tun!=null)try{tun.close();}catch(Exception ignored){}
-        if(output!=null)try{output.close();}catch(Exception ignored){}
-        if(workers!=null)workers.shutdownNow();
+    private static String message(Exception e){return e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();}
+    private void publish(State state,String detail){
+        State previous=snapshot.state;
+        snapshot=new Snapshot(state,detail,session==null?"":session.upstream.server,answered,failed);
+        if(session!=null && previous!=state)notification(state==State.ON?"DNS включён":detail);
+    }
+    private void notification(String text){
+        NotificationManager nm=getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel("geo","GeoHide DNS",NotificationManager.IMPORTANCE_LOW));
+        PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,DnsVpnService.class).setAction("STOP"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification n=new Notification.Builder(this,"geo").setSmallIcon(R.drawable.ic_power).setContentTitle("GeoHide Switch")
+            .setContentText(text).setOngoing(true).setContentIntent(open)
+            .addAction(new Notification.Action.Builder(R.drawable.ic_power,"Отключить",stop).build()).build();
+        startForeground(NOTE,n);
+    }
+    private void cleanup(){
+        Session old=session;session=null;if(old!=null)old.close();
+        if(networkCallback!=null){try{cm.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}networkCallback=null;}
         stopForeground(STOP_FOREGROUND_REMOVE);
-        super.onDestroy();
     }
-    @Override public void onRevoke(){stopSelf();}
+    private void disconnect(State state,String detail){cleanup();publish(state,detail);stopSelf();}
+    @Override public void onDestroy(){instance=null;cleanup();if(snapshot.state!=State.ERROR)publish(State.OFF,"DNS отключён");super.onDestroy();}
+    @Override public void onRevoke(){main.post(()->disconnect(State.OFF,"VPN отключён системой или другим приложением"));}
 }
