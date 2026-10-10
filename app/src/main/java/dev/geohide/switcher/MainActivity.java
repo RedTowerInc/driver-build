@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
         catch(Exception e){showError(e);}
     }
     private void connect(){
-        startingRequested=true;refresh();
+        DnsVpnService.clearError();startingRequested=true;refresh();
         try{startForegroundService(new Intent(this,DnsVpnService.class).setAction("START"));}
         catch(Exception e){startingRequested=false;showError(e);}handler.postDelayed(this::refresh,80);
     }
@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
             p.setStyle(Paint.Style.FILL);p.setColor(on?Color.rgb(29,54,42):LIME);if(isPressed())p.setAlpha(180);c.drawCircle(w/2,h/2,Math.min(w,h)/2-2,p);p.setAlpha(255);
             p.setColor(on?LIME:BG);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(w*.025f);p.setStrokeCap(Paint.Cap.ROUND);
             c.drawArc(new RectF(cx-r,cy-r,cx+r,cy+r),-50,280,false,p);c.drawLine(cx,cy-r*1.28f,cx,cy-r*.1f,p);
-            p.setStyle(Paint.Style.FILL);p.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));p.setTextSize(dp(18));p.setTextAlign(Paint.Align.CENTER);c.drawText(label,cx,h*.77f,p);
+            p.setStyle(Paint.Style.FILL);p.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));p.setTextSize(18*getResources().getDisplayMetrics().scaledDensity);if(p.measureText(label)>w*.82f)p.setTextSize(p.getTextSize()*w*.82f/p.measureText(label));p.setTextAlign(Paint.Align.CENTER);c.drawText(label,cx,h*.77f,p);
         }
     }
 }
