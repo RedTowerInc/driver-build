@@ -38,8 +38,9 @@ public class SwitchTest {
         UiObject2 yes=device.wait(Until.findObject(By.res("android","button1")),4000);
         if(yes!=null)yes.click();
     }
-    private void screenshot(String name){
-        File folder=new File(ctx.getExternalFilesDir(null),"qa");folder.mkdirs();assertTrue(device.takeScreenshot(new File(folder,name+".png")));
+    private void screenshot(String name)throws Exception{
+        device.executeShellCommand("mkdir -p /sdcard/Download/GeoHide-QA");
+        device.executeShellCommand("screencap -p /sdcard/Download/GeoHide-QA/"+name+".png");
     }
     @Before public void before()throws Exception{
         device=UiDevice.getInstance(ins);if(Build.VERSION.SDK_INT>=33)device.executeShellCommand("pm grant "+PKG+" android.permission.POST_NOTIFICATIONS");device.wakeUp();device.setOrientationNatural();
@@ -57,7 +58,7 @@ public class SwitchTest {
         activity=ins.startActivitySync(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
     }
     @After public void after()throws Exception{
-        ctx.stopService(new Intent(ctx,DnsVpnService.class));fake.close();responder.join(1000);
+        ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));fake.close();responder.join(1000);
         DnsVpnService.testServers=null;device.unfreezeRotation();ins.runOnMainSync(()->activity.finish());
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
@@ -95,20 +96,21 @@ public class SwitchTest {
         device.pressHome();ctx.startActivity(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
         assertTrue(device.wait(Until.hasObject(By.text("DNS ВКЛЮЧЁН")),4000));
         click("power");waitState(DnsVpnService.State.OFF);Thread.sleep(500);
-        assertFalse(vpnPresent());screenshot("03-off-after-stop");
+        waitNoVpn();screenshot("03-off-after-stop");
         for(int i=0;i<5;i++){click("power");waitState(DnsVpnService.State.ON);click("power");waitState(DnsVpnService.State.OFF);}
         // Cancelling an unanswered startup must be immediate and never reconnect later.
         silent=true;click("power");waitState(DnsVpnService.State.STARTING);long start=System.currentTimeMillis();click("force_stop");waitState(DnsVpnService.State.OFF);
-        assertTrue(System.currentTimeMillis()-start<2000);Thread.sleep(1200);assertEquals(DnsVpnService.State.OFF,DnsVpnService.current().state);assertFalse(vpnPresent());
+        assertTrue(System.currentTimeMillis()-start<2000);Thread.sleep(1200);assertEquals(DnsVpnService.State.OFF,DnsVpnService.current().state);waitNoVpn();
         // Rapid clicks cannot leave stale state or a VPN after forced stop.
         silent=false;
         ins.runOnMainSync(()->{Activity live=ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).iterator().next();View v=live.findViewById(R.id.power);for(int i=0;i<20;i++)v.performClick();});
-        click("force_stop");waitState(DnsVpnService.State.OFF);Thread.sleep(500);assertFalse(vpnPresent());
+        click("force_stop");waitState(DnsVpnService.State.OFF);Thread.sleep(500);waitNoVpn();
         click("power");waitState(DnsVpnService.State.ON);
         // Exercise onRevoke callback separately from normal onDestroy.
-        ins.runOnMainSync(()->{assertNotNull(DnsVpnService.instance);DnsVpnService.instance.onRevoke();});waitState(DnsVpnService.State.OFF);assertFalse(vpnPresent());
+        ins.runOnMainSync(()->{assertNotNull(DnsVpnService.instance);DnsVpnService.instance.onRevoke();});waitState(DnsVpnService.State.OFF);waitNoVpn();
         assertFalse(hasOngoingNotification());
     }
+    private void waitNoVpn()throws Exception{long end=System.currentTimeMillis()+3000;while(vpnPresent() && System.currentTimeMillis()<end)Thread.sleep(50);assertFalse(vpnPresent());}
     private boolean vpnPresent(){ConnectivityManager cm=ctx.getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return true;}return false;}
     private boolean hasOngoingNotification(){for(android.service.notification.StatusBarNotification n:ctx.getSystemService(NotificationManager.class).getActiveNotifications())if(n.getId()==1203)return true;return false;}
 }

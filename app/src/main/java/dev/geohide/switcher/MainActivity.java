@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
         try{startForegroundService(new Intent(this,DnsVpnService.class).setAction("START"));}
         catch(Exception e){startingRequested=false;showError(e);}handler.postDelayed(this::refresh,80);
     }
-    private void stop(){permissionPending=false;startingRequested=false;stopService(new Intent(this,DnsVpnService.class));DnsVpnService.clearError();handler.postDelayed(this::refresh,80);refresh();}
+    private void stop(){permissionPending=false;startingRequested=false;try{startService(new Intent(this,DnsVpnService.class).setAction("STOP"));}catch(Exception e){showError(e);}DnsVpnService.clearError();handler.postDelayed(this::refresh,80);refresh();}
     private void showError(Exception e){new AlertDialog.Builder(this).setTitle("Не удалось включить DNS").setMessage(e.getMessage()).setPositiveButton("Понятно",null).show();}
     @Override protected void onActivityResult(int rc,int result,Intent data){super.onActivityResult(rc,result,data);if(rc==22){boolean requested=permissionPending;permissionPending=false;if(requested && result==RESULT_OK)connect();refresh();}}
     private class PowerButton extends View {
