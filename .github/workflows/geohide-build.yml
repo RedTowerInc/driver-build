@@ -44,12 +44,6 @@ jobs:
           disable-animations: true
           script: |
             bash scripts/device-qa.sh
-      - name: Collect screenshots
-        if: always()
-        run: |
-          mkdir -p qa/screenshots
-          adb pull /sdcard/Android/data/dev.geohide.switcher/files/qa qa/screenshots || true
-          adb logcat -d > qa/logcat.txt || true
       - name: Package APK
         if: success() && matrix.api == 35
         run: |
