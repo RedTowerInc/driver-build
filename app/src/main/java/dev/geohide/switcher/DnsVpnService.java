@@ -7,6 +7,7 @@ import android.os.*;
 import android.system.OsConstants;
 import android.system.Os;
 import android.system.ErrnoException;
+import android.system.StructPollfd;
 import java.io.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -110,10 +111,13 @@ public class DnsVpnService extends VpnService {
         byte[] b=new byte[65535];
         try{
             while(!s.cancelled){
+                StructPollfd poll=new StructPollfd();poll.fd=s.tun.getFileDescriptor();poll.events=(short)OsConstants.POLLIN;
+                if(Os.poll(new StructPollfd[]{poll},500)==0)continue;
+                if(s.cancelled)break;
                 int n;
                 try{n=Os.read(s.tun.getFileDescriptor(),b,0,b.length);}
-                catch(ErrnoException e){if(e.errno==OsConstants.EAGAIN || e.errno==OsConstants.EINTR){Thread.sleep(20);continue;}throw e;}
-                if(n<=0){Thread.sleep(20);continue;}
+                catch(ErrnoException e){if(e.errno==OsConstants.EAGAIN || e.errno==OsConstants.EINTR){continue;}throw e;}
+                if(n<=0)continue;
                 DnsPackets.Query q=DnsPackets.parse(b,n);if(q==null)continue;
                 try{s.workers.execute(()->forward(s,q));}
                 catch(RejectedExecutionException e){write(s,q,DnsPackets.failure(q.dns));}
@@ -157,5 +161,5 @@ public class DnsVpnService extends VpnService {
     }
     private void disconnect(State state,String detail){cleanup();publish(state,detail);stopSelf();}
     @Override public void onDestroy(){instance=null;cleanup();if(snapshot.state!=State.ERROR)publish(State.OFF,"DNS отключён");super.onDestroy();}
-    @Override public void onRevoke(){main.post(()->disconnect(State.OFF,"VPN отключён системой или другим приложением"));}
+    @Override public void onRevoke(){main.post(()->{if(instance==this)disconnect(State.OFF,"VPN отключён системой или другим приложением");});}
 }

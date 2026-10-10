@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
         add(root,text("Без root · локальный VPN только для DNS\nДругой VPN одновременно использовать нельзя.\nСобственный Secure DNS браузера может обходить приложение.",12,MUTED),-2,22);
         add(root,text("GeoHide Switch 2.0 · неофициальный клиент\nGeoHide не является полноценным обходом DPI.",11,MUTED),-2,18);
         setContentView(scroll);refresh();
+        if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
     @Override protected void onResume(){super.onResume();handler.removeCallbacks(update);update.run();}
     @Override protected void onPause(){handler.removeCallbacks(update);super.onPause();}

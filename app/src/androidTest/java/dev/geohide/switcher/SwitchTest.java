@@ -42,15 +42,16 @@ public class SwitchTest {
         File folder=new File(ctx.getExternalFilesDir(null),"qa");folder.mkdirs();assertTrue(device.takeScreenshot(new File(folder,name+".png")));
     }
     @Before public void before()throws Exception{
-        device=UiDevice.getInstance(ins);device.wakeUp();device.setOrientationNatural();
+        device=UiDevice.getInstance(ins);if(Build.VERSION.SDK_INT>=33)device.executeShellCommand("pm grant "+PKG+" android.permission.POST_NOTIFICATIONS");device.wakeUp();device.setOrientationNatural();
         fake=new DatagramSocket(0,InetAddress.getByName("127.0.0.1"));fake.setSoTimeout(300);
         DnsVpnService.testServers=new String[]{"127.0.0.1"};DnsVpnService.testPort=fake.getLocalPort();
         responder=new Thread(()->{while(!fake.isClosed())try{
             byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);fake.receive(p);if(silent)continue;
-            byte[] q=Arrays.copyOf(b,p.getLength()),r=Arrays.copyOf(q,q.length+16);
-            r[2]=(byte)0x81;r[3]=(byte)0x80;DnsPackets.p16(r,6,1);
-            int n=q.length;r[n]=(byte)0xc0;r[n+1]=0x0c;r[n+3]=1;r[n+5]=1;r[n+9]=60;r[n+11]=4;
-            r[n+12]=(byte)203;r[n+13]=0;r[n+14]=113;r[n+15]=7;
+            byte[] q=Arrays.copyOf(b,p.getLength());int end=DnsPackets.questionEnd(q);if(end<0)continue;
+            boolean a=DnsPackets.u16(q,end-4)==1;byte[] r=Arrays.copyOf(q,end+(a?16:0));
+            r[2]=(byte)0x81;r[3]=(byte)0x80;DnsPackets.p16(r,6,a?1:0);DnsPackets.p16(r,8,0);DnsPackets.p16(r,10,0);
+            if(a){int n=end;r[n]=(byte)0xc0;r[n+1]=0x0c;r[n+3]=1;r[n+5]=1;r[n+9]=60;r[n+11]=4;
+            r[n+12]=(byte)203;r[n+13]=0;r[n+14]=113;r[n+15]=7;}
             fake.send(new DatagramPacket(r,r.length,p.getSocketAddress()));
         }catch(SocketTimeoutException ignored){}catch(Exception e){if(!fake.isClosed())throw new RuntimeException(e);}},"FakeDNS");responder.start();
         activity=ins.startActivitySync(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
@@ -71,6 +72,23 @@ public class SwitchTest {
             assertTrue(DnsPackets.matches(q,Arrays.copyOf(b,p.getLength())));assertEquals(7,b[p.getLength()-1]);
         }
         assertTrue(DnsVpnService.current().answered>0);
+        ConnectivityManager cm=ctx.getSystemService(ConnectivityManager.class);
+        Network vpn=null;
+        for(Network n:cm.getAllNetworks()){NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap!=null && cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))vpn=n;}
+        assertNotNull(vpn);InetAddress[] systemAnswer=vpn.getAllByName("dnstest.geohide.ru");assertTrue(systemAnswer.length>0);
+        // Loss and restoration of upstream response must be visible, with VPN still stoppable.
+        silent=true;
+        try(DatagramSocket client=new DatagramSocket()){
+            client.setSoTimeout(4000);byte[] q=DnsPackets.probe(1112);client.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));
+            byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);client.receive(p);assertEquals(2,b[3]&15);
+        }
+        waitState(DnsVpnService.State.WAITING);Thread.sleep(300);screenshot("04-no-dns-answer");silent=false;
+        try(DatagramSocket client=new DatagramSocket()){
+            client.setSoTimeout(4000);byte[] q=DnsPackets.probe(1113);client.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));
+            byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);client.receive(p);assertEquals(0,b[3]&15);
+        }
+        waitState(DnsVpnService.State.ON);
+
         device.setOrientationLeft();Thread.sleep(800);assertEquals(DnsVpnService.State.ON,DnsVpnService.current().state);
         device.setOrientationNatural();Thread.sleep(800);
         // Resume must reflect the running service.
