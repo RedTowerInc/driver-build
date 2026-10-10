@@ -1,0 +1,1 @@
+GeoHide Switch Android: DNS-only local VPN. Source variant for GitHub build. Press to enable/disable. The app uses the single Android VPN slot.\n
