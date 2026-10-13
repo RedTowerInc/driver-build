@@ -168,13 +168,19 @@ class DnsUpstream implements Closeable {
         }finally{calls.remove(call);}
     }
     private static void check(byte[] q,byte[] r)throws IOException{if(!DnsPackets.matches(q,r))throw new IOException("Invalid DNS response");}
-    synchronized void networkChanged(){
-        generation++;
-        if(auto!=null)for(DnsUpstream child:auto)child.networkChanged();
-        if(http!=null)http.connectionPool().evictAll();
-        else {idle.clear();for(Closeable socket:sockets)try{socket.close();}catch(IOException ignored){}sockets.clear();}
+    private void abortSockets(){
+        Closeable[] captured=sockets.toArray(new Closeable[0]);sockets.clear();
+        // Close raw transports first so blocked readers wake immediately. SSL wrappers
+        // are finalized on the I/O thread; Conscrypt close_notify must not run on UI.
+        for(Closeable socket:captured)if(!(socket instanceof SSLSocket))IoCleanup.close(socket);
+        IoCleanup.run(()->{for(Closeable socket:captured)if(socket instanceof SSLSocket)IoCleanup.close(socket);});
     }
-    @Override public synchronized void close(){closed=true;idle.clear();if(auto!=null)for(DnsUpstream child:auto)child.close();for(Call c:calls)c.cancel();calls.clear();
-        if(http!=null){http.dispatcher().cancelAll();http.connectionPool().evictAll();http.dispatcher().executorService().shutdown();}
-        for(Closeable s:sockets)try{s.close();}catch(IOException ignored){}sockets.clear();}
+    synchronized void networkChanged(){
+        generation++;idle.clear();if(auto!=null)for(DnsUpstream child:auto)child.networkChanged();abortSockets();if(http!=null)IoCleanup.run(()->http.connectionPool().evictAll());
+    }
+    @Override public synchronized void close(){
+        if(closed)return;closed=true;idle.clear();if(auto!=null)for(DnsUpstream child:auto)child.close();
+        Call[] pending=calls.toArray(new Call[0]);calls.clear();abortSockets();
+        IoCleanup.run(()->{for(Call c:pending)c.cancel();if(http!=null){http.dispatcher().cancelAll();http.connectionPool().evictAll();http.dispatcher().executorService().shutdown();}});
+    }
 }

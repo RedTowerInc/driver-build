@@ -54,6 +54,9 @@ final class Diagnostics implements AutoCloseable {
     }
     private static long ms(long start){return TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-start);}
     static String report(Context c){DnsVpnService.Snapshot s=DnsVpnService.current();DnsProfiles.Selection choice=DnsSettings.load(c);return "GeoHide Switch "+BuildConfig.VERSION_NAME+"\nAndroid API "+android.os.Build.VERSION.SDK_INT+"\nСеть: "+NetworkProfiles.label(NetworkProfiles.kind(c))+"\nРежим: "+(DnsSettings.fullVpn(c)?"VPN":"DNS")+"\nDNS-профиль: "+choice.profile.name+"\nВыбранный транспорт: "+choice.transport.label+"\nСостояние: "+s.state+"\nОтветов DNS: "+s.answered+"; ошибок: "+s.failed+"\n\nПоследняя проверка:\n"+last+"\n\nОграниченный журнал:\n"+EventLog.text()+"\n\nВ отчёте нет ключей VPN, конфигураций, cookies, заголовков авторизации или истории посещений. Проверочные запросы отправлялись только к выбранному контрольному сервису.\n";}
-    @Override public synchronized void close(){if(dns!=null)dns.close();if(call!=null)call.cancel();for(Closeable s:sockets)try{s.close();}catch(IOException ignored){}sockets.clear();if(ownClient!=null){ownClient.dispatcher().cancelAll();ownClient.connectionPool().evictAll();ownClient.dispatcher().executorService().shutdown();}}
+    @Override public synchronized void close(){
+        if(dns!=null)dns.close();Call pending=call;OkHttpClient client=ownClient;Closeable[] captured=sockets.toArray(new Closeable[0]);sockets.clear();for(Closeable socket:captured)if(!(socket instanceof SSLSocket))IoCleanup.close(socket);
+        IoCleanup.run(()->{if(pending!=null)pending.cancel();for(Closeable socket:captured)if(socket instanceof SSLSocket)IoCleanup.close(socket);if(client!=null){client.dispatcher().cancelAll();client.connectionPool().evictAll();client.dispatcher().executorService().shutdown();}});
+    }
     void cancel(){cancelled=true;close();}
 }
