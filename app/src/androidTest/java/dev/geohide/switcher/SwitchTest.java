@@ -58,7 +58,7 @@ public class SwitchTest {
     }
     @After public void after()throws Exception{
         ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));waitState(DnsVpnService.State.OFF);waitNoVpn();fake.close();responder.join(1000);
-        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;CoreProcess.testCapture=false;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
+        DnsVpnService.testServers=null;DnsVpnService.testTrace=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;CoreProcess.testCapture=false;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
         screenshot("01-off");
@@ -165,11 +165,23 @@ public class SwitchTest {
         assertEquals("cloudflare",DnsVpnService.current().choice.profile.id);waitState(DnsVpnService.State.ON);click("power");waitState(DnsVpnService.State.OFF);waitNoVpn();
     }
     @Test public void autoThroughTunAndReportExport()throws Exception{
+        DnsVpnService.testTrace="";
         DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.find("dns_ai"),DnsProfiles.Transport.AUTO));DnsVpnService.testServers=null;
         try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false)){
             DnsVpnService.testUpstream=new DnsUpstream(NetworkProfiles.protector(ctx),new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOT),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
             click("power");grant();waitState(DnsVpnService.State.ON);assertEquals(DnsProfiles.Transport.AUTO,DnsVpnService.current().choice.transport);assertTrue(DnsVpnService.current().server.contains("TLS"));waitDnsRouting();
-            try(DatagramSocket socket=new DatagramSocket()){ctx.getSystemService(ConnectivityManager.class).getActiveNetwork().bindSocket(socket);socket.setSoTimeout(6000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);try{socket.receive(reply);}catch(SocketTimeoutException e){throw new AssertionError("TLS fixture requests="+tls.requests.get()+"; created="+DnsVpnService.testUpstream.tlsCreated.get()+"; reused="+DnsVpnService.testUpstream.tlsReused.get()+"\n"+Diagnostics.report(ctx),e);}assertEquals(8,b[reply.getLength()-1]);}
+            try(DatagramSocket socket=new DatagramSocket()){
+                ctx.getSystemService(ConnectivityManager.class).getActiveNetwork().bindSocket(socket);socket.setSoTimeout(2000);
+                byte[] q=DnsPackets.probe(700),b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);boolean received=false;
+                // UDP has no delivery guarantee during route installation. Retry within
+                // the same six-second budget and require a matching real TUN reply.
+                for(int attempt=0;attempt<3 && !received;attempt++){
+                    socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));
+                    try{socket.receive(reply);received=true;}catch(SocketTimeoutException ignored){}
+                }
+                assertTrue("TUN trace="+DnsVpnService.testTrace+"; TLS requests="+tls.requests.get()+"; created="+DnsVpnService.testUpstream.tlsCreated.get()+"; reused="+DnsVpnService.testUpstream.tlsReused.get(),received);
+                assertTrue(DnsPackets.matches(q,Arrays.copyOf(b,reply.getLength())));assertEquals(8,b[reply.getLength()-1]);
+            }
             assertTrue(DnsVpnService.testUpstream.tlsReused.get()>0);screenshot("07-auto-active");click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         }finally{DnsVpnService.testUpstream=null;}
         EventLog.record("ss://do-not-export-secret","secret-mode",EventLog.Result.IO,1);
