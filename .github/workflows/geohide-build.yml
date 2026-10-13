@@ -6,7 +6,27 @@ on:
 permissions:
   contents: read
 jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: actions/cache@v4
+        with:
+          path: build/native-deps
+          key: geohide-native-sing1143-hev2180-ndk27-v1
+      - run: bash scripts/build-native.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GeoHide-Native
+          path: |
+            app/src/main/jniLibs/
+            app/src/main/assets/licenses/
   verify:
+    needs: native
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,6 +45,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: GeoHide-Native
+          path: app/src/main
       - name: SDK and build checks
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
@@ -56,6 +80,8 @@ jobs:
           mkdir -p deliverables
           cp app/build/outputs/apk/debug/app-debug.apk deliverables/GeoHideSwitch_v2.1.1_Android.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs deliverables/GeoHideSwitch_v2.1.1_Android.apk > deliverables/apk-signature.txt
+          mkdir -p deliverables/tools
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" deliverables/tools/
           sha256sum deliverables/GeoHideSwitch_v2.1.1_Android.apk > deliverables/SHA256.txt
       - uses: actions/upload-artifact@v4
         if: success() && matrix.api == 35
