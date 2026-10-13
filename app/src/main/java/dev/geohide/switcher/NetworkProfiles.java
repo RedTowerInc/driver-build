@@ -31,7 +31,7 @@ final class NetworkProfiles {
     static boolean strictPrivateDns(Context c){physical(c);synchronized(NetworkProfiles.class){return cachedPrivate;}}
     static String label(String kind){return "wifi".equals(kind)?"Wi-Fi":"mobile".equals(kind)?"Мобильная сеть":"Другая сеть";}
     static DnsUpstream.Protector protector(Context c){return new DnsUpstream.Protector(){
-        public boolean tcp(Socket s){try{if(!s.isBound())s.bind(new InetSocketAddress(0));DnsVpnService service=DnsVpnService.instance;if(service!=null && !service.protect(s))return false;Network n=physical(c);if(n!=null)n.bindSocket(s);return n!=null;}catch(IOException e){return false;}}
+        public boolean tcp(Socket s){try{if(!s.isBound())s.bind(new InetSocketAddress(0));Network n=physical(c);if(n==null)return false;n.bindSocket(s);DnsVpnService service=DnsVpnService.instance;return service==null || service.protect(s);}catch(IOException e){return false;}}
         public boolean udp(DatagramSocket s){try{DnsVpnService service=DnsVpnService.instance;if(service!=null && !service.protect(s))return false;Network n=physical(c);if(n!=null)n.bindSocket(s);return n!=null;}catch(IOException e){return false;}}
     };}
 }

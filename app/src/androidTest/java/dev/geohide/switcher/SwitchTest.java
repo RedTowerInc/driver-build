@@ -29,7 +29,7 @@ public class SwitchTest {
     private void waitState(DnsVpnService.State state)throws Exception{
         long end=System.currentTimeMillis()+8000;
         while(System.currentTimeMillis()<end){if(DnsVpnService.current().state==state)return;Thread.sleep(50);}
-        fail("Expected "+state+", got "+DnsVpnService.current().state+" "+DnsVpnService.current().detail);
+        fail("Expected "+state+", got "+DnsVpnService.current().state+" "+DnsVpnService.current().detail+"\n"+CoreProcess.testLog());
     }
     private void click(String id)throws Exception{
         new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId(PKG+":id/"+id));
@@ -58,7 +58,7 @@ public class SwitchTest {
     }
     @After public void after()throws Exception{
         ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));waitState(DnsVpnService.State.OFF);waitNoVpn();fake.close();responder.join(1000);
-        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
+        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;CoreProcess.testCapture=false;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
         screenshot("01-off");
@@ -169,7 +169,7 @@ public class SwitchTest {
         try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false)){
             DnsVpnService.testUpstream=new DnsUpstream(NetworkProfiles.protector(ctx),new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOT),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
             click("power");grant();waitState(DnsVpnService.State.ON);assertEquals(DnsProfiles.Transport.AUTO,DnsVpnService.current().choice.transport);assertTrue(DnsVpnService.current().server.contains("TLS"));
-            try(DatagramSocket socket=new DatagramSocket()){socket.setSoTimeout(6000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);socket.receive(reply);assertEquals(8,b[reply.getLength()-1]);}
+            try(DatagramSocket socket=new DatagramSocket()){socket.setSoTimeout(6000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);try{socket.receive(reply);}catch(SocketTimeoutException e){throw new AssertionError("TLS fixture requests="+tls.requests.get()+"; created="+DnsVpnService.testUpstream.tlsCreated.get()+"; reused="+DnsVpnService.testUpstream.tlsReused.get()+"\n"+Diagnostics.report(ctx),e);}assertEquals(8,b[reply.getLength()-1]);}
             assertTrue(DnsVpnService.testUpstream.tlsReused.get()>0);screenshot("07-auto-active");click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         }finally{DnsVpnService.testUpstream=null;}
         EventLog.record("ss://do-not-export-secret","secret-mode",EventLog.Result.IO,1);
@@ -183,6 +183,7 @@ public class SwitchTest {
     @Test public void fullVpnNativeTrojanTlsTcpUdpAndCleanup()throws Exception{nativeProxy("trojan");}
     @Test public void fullVpnNativeVlessTlsTcpUdpAndCleanup()throws Exception{nativeProxy("vless");}
     private void nativeProxy(String type)throws Exception{
+        CoreProcess.clearTestLog();CoreProcess.testCapture=true;
         DnsVpnService.testServers=null;
         try(ServerSocket http=new ServerSocket(0,10,InetAddress.getByName("127.0.0.1"));ServerSocket reserve=new ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))){
             int remotePort=reserve.getLocalPort();reserve.close();java.util.concurrent.atomic.AtomicInteger hits=new java.util.concurrent.atomic.AtomicInteger();

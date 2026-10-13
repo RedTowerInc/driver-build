@@ -28,7 +28,7 @@ final class TlsFixture implements Closeable {
         TrustManagerFactory tm=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());tm.init(k);trust=(X509TrustManager)tm.getTrustManagers()[0];
         context=SSLContext.getInstance("TLS");context.init(km.getKeyManagers(),tm.getTrustManagers(),new SecureRandom());
         server=(SSLServerSocket)context.getServerSocketFactory().createServerSocket(0,30,InetAddress.getByName("127.0.0.1"));
-        workers.execute(()->{while(!server.isClosed())try{Socket s=server.accept();clients.add(s);workers.execute(()->handle(s));}catch(IOException e){if(!server.isClosed())throw new RuntimeException(e);}});
+        workers.execute(()->{while(!server.isClosed())try{Socket s=server.accept();if(DnsVpnService.instance!=null)DnsVpnService.instance.protect(s);clients.add(s);workers.execute(()->handle(s));}catch(IOException e){if(!server.isClosed())throw new RuntimeException(e);}});
     }
     OkHttpClient client(){return new OkHttpClient.Builder().sslSocketFactory(context.getSocketFactory(),trust).build();}
     DnsProfiles.Profile profile(String tlsHost){return new DnsProfiles.Profile("fixture","TLS fixture","Local test only",tlsHost,"https://"+tlsHost+":"+server.getLocalPort()+"/dns-query","https://localhost/",new String[]{"127.0.0.1"},false,DnsProfiles.Transport.DOH);}
