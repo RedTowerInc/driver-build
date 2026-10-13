@@ -88,15 +88,15 @@ jobs:
         if: success() && matrix.api == 35
         run: |
           mkdir -p deliverables
-          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/GeoHideSwitch_v2.2.0_Android.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/GeoHideSwitch_v2.2.1_Android.apk
           echo "Unsigned release; permanent signature applied locally after QA" > deliverables/apk-signature.txt
           mkdir -p deliverables/tools
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" deliverables/tools/
-          sha256sum deliverables/GeoHideSwitch_v2.2.0_Android.apk > deliverables/SHA256.txt
+          sha256sum deliverables/GeoHideSwitch_v2.2.1_Android.apk > deliverables/SHA256.txt
       - uses: actions/upload-artifact@v4
         if: success() && matrix.api == 35
         with:
-          name: GeoHideSwitch-v2.2.0-APK
+          name: GeoHideSwitch-v2.2.1-APK
           path: deliverables/
       - uses: actions/upload-artifact@v4
         if: always()

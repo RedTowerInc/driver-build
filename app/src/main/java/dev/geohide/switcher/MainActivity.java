@@ -16,6 +16,9 @@ public class MainActivity extends Activity {
     private TextView status,detail,stats,profileInfo;
     private Button profileButton,transportButton,modeButton,networkButton;
     private Diagnostics diagnostic;
+    private SubscriptionLoader subscription;
+    private AlertDialog loadingSubscription;
+    static volatile okhttp3.OkHttpClient testSubscriptionClient;
     private final java.util.concurrent.ExecutorService checks=java.util.concurrent.Executors.newSingleThreadExecutor();
     private String pendingReport;
 
@@ -55,13 +58,13 @@ public class MainActivity extends Activity {
         Button settings=new Button(this);settings.setText("Открыть настройки VPN");settings.setAllCaps(false);settings.setTextColor(MUTED);settings.setTextSize(14);settings.setBackgroundColor(Color.TRANSPARENT);
         add(root,settings,dp(48),8);settings.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_VPN_SETTINGS));}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}});
         add(root,text("Без root · DNS либо полный VPN\nДругой VPN одновременно использовать нельзя.\nСобственный Secure DNS браузера может обходить приложение.",12,MUTED),-2,22);
-        add(root,text("GeoHide Switch 2.2 · DNS и VPN\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
+        add(root,text("GeoHide Switch 2.2.1 · DNS и VPN\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
         setContentView(scroll);refresh();
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
     @Override protected void onResume(){super.onResume();selection=DnsSettings.load(this);handler.removeCallbacks(update);update.run();}
-    @Override protected void onPause(){handler.removeCallbacks(update);if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}super.onPause();}
-    @Override protected void onDestroy(){if(diagnostic!=null)diagnostic.cancel();checks.shutdownNow();super.onDestroy();}
+    @Override protected void onPause(){handler.removeCallbacks(update);if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}cancelSubscription();super.onPause();}
+    @Override protected void onDestroy(){if(diagnostic!=null)diagnostic.cancel();cancelSubscription();checks.shutdownNow();super.onDestroy();}
     @Override protected void onSaveInstanceState(Bundle b){b.putBoolean("permissionPending",permissionPending);b.putString("pendingReport",pendingReport);super.onSaveInstanceState(b);}
     private void refresh(){
         if(power==null)return;DnsVpnService.Snapshot s=DnsVpnService.current();
@@ -122,11 +125,38 @@ public class MainActivity extends Activity {
     private void stop(){if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}permissionPending=false;startingRequested=false;try{startService(new Intent(this,DnsVpnService.class).setAction("STOP"));}catch(Exception e){showError(e);}DnsVpnService.clearError();handler.postDelayed(this::refresh,80);refresh();}
     private void showError(Exception e){new AlertDialog.Builder(this).setTitle("Не удалось включить DNS").setMessage(e.getMessage()).setPositiveButton("Понятно",null).show();}
     @Override protected void onActivityResult(int rc,int result,Intent data){super.onActivityResult(rc,result,data);if(rc==24){String report=pendingReport;pendingReport=null;if(result==RESULT_OK && data!=null && data.getData()!=null && report!=null){try(java.io.OutputStream out=getContentResolver().openOutputStream(data.getData(),"wt")){if(out==null)throw new java.io.IOException();out.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));Toast.makeText(this,"Отчёт сохранён",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Не удалось сохранить отчёт",Toast.LENGTH_LONG).show();}}return;}if(rc==22){boolean requested=permissionPending;permissionPending=false;if(requested && result==RESULT_OK)connect();refresh();}}
-    private void chooseMode(){new AlertDialog.Builder(this).setTitle("Режим подключения").setSingleChoiceItems(new String[]{"Только DNS · GeoHide / DNS-AI / другие","Полный VPN · собственный сервер"},DnsSettings.fullVpn(this)?1:0,(dialog,which)->{DnsSettings.fullVpn(this,which==1);dialog.dismiss();refresh();}).setNegativeButton("Отмена",null).show();}
+    private void chooseMode(){new AlertDialog.Builder(this).setTitle("Режим подключения").setSingleChoiceItems(new String[]{"Только DNS · GeoHide / DNS-AI / другие","Полный VPN · импорт сервера или подписки"},DnsSettings.fullVpn(this)?1:0,(dialog,which)->{DnsSettings.fullVpn(this,which==1);dialog.dismiss();refresh();}).setNegativeButton("Отмена",null).show();}
     private void importProxy(){
-        EditText input=new EditText(this);input.setHint("ss://… / vless://… / trojan://…\nили JSON одного outbound sing-box");input.setMinLines(3);input.setMaxLines(6);input.setTextColor(Color.WHITE);input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);input.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(32768)});
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Импорт VPN-сервера").setMessage("Конфигурация сохраняется зашифрованно. TLS-проверка обязательна; старые и открытые шифры не поддерживаются.").setView(input).setPositiveButton("Сохранить",null).setNeutralButton("Удалить",(d,w)->{ProxyStore.clear(this);refresh();}).setNegativeButton("Отмена",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{ProxyStore.save(this,input.getText().toString());input.setText("");dialog.dismiss();refresh();Toast.makeText(this,"Конфигурация сохранена",Toast.LENGTH_SHORT).show();}catch(Exception e){input.setError("Проверьте ссылку, AEAD-шифр, TLS/REALITY и формат одного outbound");}}));dialog.show();
+        EditText input=new EditText(this);input.setId(R.id.proxy_import_input);input.setHint("https://… — подписка\nss://… / vless://… / trojan://…\nили JSON одного сервера");input.setMinLines(3);input.setMaxLines(6);input.setTextColor(Color.WHITE);input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);input.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(32768)});
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Импорт VPN-сервера или подписки").setMessage("Вставьте ключ сервера или HTTPS-ссылку на подписку, например Portal. После загрузки выберите совместимый сервер. Конфигурация хранится зашифрованно; проверка сертификата обязательна.").setView(input).setPositiveButton("Импортировать",null).setNeutralButton("Удалить",(d,w)->{ProxyStore.clear(this);refresh();}).setNegativeButton("Отмена",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String value=ProxySubscription.clean(input.getText().toString());input.setError(null);
+            if(ProxySubscription.isUrl(value)){loadSubscription(value,input,dialog);return;}
+            try{
+                if(!value.startsWith("{") && (value.contains("\n") || !value.contains("://"))){ProxySubscription.Result result=ProxySubscription.parse(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));input.setText("");dialog.dismiss();chooseSubscription(result);}
+                else{ProxyStore.save(this,value);input.setText("");dialog.dismiss();refresh();Toast.makeText(this,"Конфигурация сохранена",Toast.LENGTH_SHORT).show();}
+            }catch(Exception e){input.setError(ProxySubscription.error(e));}
+        }));dialog.show();
+    }
+    private void loadSubscription(String url,EditText input,AlertDialog editor){
+        try{ProxySubscription.https(url);}catch(Exception e){input.setError(ProxySubscription.error(e));return;}
+        cancelSubscription();SubscriptionLoader task=new SubscriptionLoader(BuildConfig.DEBUG?testSubscriptionClient:null);subscription=task;
+        AlertDialog progress=new AlertDialog.Builder(this).setTitle("Загрузка подписки").setMessage("Загружаем список и проверяем совместимость профилей…").setNegativeButton("Отмена",null).create();loadingSubscription=progress;
+        progress.setOnDismissListener(d->{if(subscription==task){subscription=null;task.close();}if(loadingSubscription==progress)loadingSubscription=null;});progress.show();
+        checks.execute(()->{ProxySubscription.Result result=null;String error=null;try{result=task.load(url);}catch(Exception e){error=ProxySubscription.error(e);}final ProxySubscription.Result loaded=result;final String message=error;
+            handler.post(()->{if(subscription!=task || isFinishing() || isDestroyed())return;subscription=null;loadingSubscription=null;progress.dismiss();
+                if(loaded==null){input.setError(message);return;}input.setText("");editor.dismiss();chooseSubscription(loaded);
+            });
+        });
+    }
+    private void cancelSubscription(){SubscriptionLoader task=subscription;subscription=null;if(task!=null)task.close();AlertDialog dialog=loadingSubscription;loadingSubscription=null;if(dialog!=null)dialog.dismiss();}
+    private void chooseSubscription(ProxySubscription.Result result){
+        String[] labels=new String[result.entries.size()];for(int i=0;i<labels.length;i++)labels[i]=result.entries.get(i).label;
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Серверы подписки ("+labels.length+")").setItems(labels,(d,index)->{
+            DnsVpnService.State state=DnsVpnService.current().state;if(state!=DnsVpnService.State.OFF && state!=DnsVpnService.State.ERROR){Toast.makeText(this,"Сначала отключите VPN",Toast.LENGTH_LONG).show();return;}
+            try{ProxyStore.save(this,result.entries.get(index).config);refresh();Toast.makeText(this,"Сервер сохранён. Нажмите Включить",Toast.LENGTH_LONG).show();}catch(Exception e){new AlertDialog.Builder(this).setTitle("Импорт не завершён").setMessage(ProxySubscription.error(e)).setPositiveButton("Закрыть",null).show();}
+        }).setNegativeButton("Отмена",null).setNeutralButton("Пропущено: "+result.skippedCount(),null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Совместимость подписки").setMessage(result.summary()).setPositiveButton("Закрыть",null).show()));dialog.show();
     }
     private void networkProfiles(){
         String[] kinds={"wifi","mobile","other"};String[] items=new String[3];for(int i=0;i<3;i++)items[i]=NetworkProfiles.label(kinds[i])+": "+DnsSettings.loadFor(this,kinds[i]).label();

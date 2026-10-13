@@ -58,7 +58,7 @@ public class SwitchTest {
     }
     @After public void after()throws Exception{
         ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));waitState(DnsVpnService.State.OFF);waitNoVpn();fake.close();responder.join(1000);
-        DnsVpnService.testServers=null;DnsVpnService.testTrace=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;CoreProcess.testCapture=false;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
+        MainActivity.testSubscriptionClient=null;DnsVpnService.testServers=null;DnsVpnService.testTrace=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;ProxyRuntime.testCertificate=null;CoreProcess.testCapture=false;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
         screenshot("01-off");
@@ -190,6 +190,21 @@ public class SwitchTest {
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(documentFilter,new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(file)),true);
         try{click("export_report");Thread.sleep(500);assertTrue(monitor.getHits()>0);try(InputStream in=ctx.getContentResolver().openInputStream(file)){assertNotNull(in);String report=new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertTrue(report.contains("GeoHide Switch"));assertTrue(report.contains("AUTO"));assertFalse(report.contains("do-not-export-secret"));}}
         finally{ins.removeMonitor(monitor);ctx.getContentResolver().delete(file,null,null);}
+    }
+    @Test public void httpsSubscriptionImportsSelectedServerAndRejectsUnsupported()throws Exception{
+        DnsSettings.fullVpn(ctx,true);ctx.startActivity(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
+        String key="vless://00000000-0000-4000-8000-000000000001@example.com:443?security=tls&sni=example.com&type=raw#Portal%20test";
+        byte[] payload=java.util.Base64.getEncoder().encode((key+"\n"+key.replace("type=raw","type=xhttp")+"\n"+key.replace("security=tls","security=tls&allowInsecure=1")).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false);javax.net.ssl.SSLServerSocket server=(javax.net.ssl.SSLServerSocket)tls.context.getServerSocketFactory().createServerSocket(0,8,InetAddress.getByName("127.0.0.1"))){
+            MainActivity.testSubscriptionClient=tls.client();
+            Thread responder=new Thread(()->{try(Socket socket=server.accept()){socket.setSoTimeout(6000);BufferedReader reader=new BufferedReader(new InputStreamReader(socket.getInputStream()));String line;while((line=reader.readLine())!=null && !line.isEmpty()){}String headers="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "+payload.length+"\r\nConnection: close\r\n\r\n";socket.getOutputStream().write(headers.getBytes(java.nio.charset.StandardCharsets.US_ASCII));socket.getOutputStream().write(payload);socket.getOutputStream().flush();}catch(Exception ignored){}},"Subscription-TLS-fixture");responder.start();
+            click("profile");UiObject2 input=device.wait(Until.findObject(By.res(PKG,"proxy_import_input")),3000);assertNotNull(input);input.setText("https://localhost:"+server.getLocalPort()+"/CP-035");device.findObject(By.text("Импортировать")).click();
+            assertTrue(device.wait(Until.hasObject(By.text("Серверы подписки (1)")),10000));screenshot("09-subscription-servers");
+            device.findObject(By.text("Пропущено: 2")).click();assertTrue(device.wait(Until.hasObject(By.text("Совместимость подписки")),3000));device.findObject(By.text("Закрыть")).click();
+            UiObject2 selected=device.wait(Until.findObject(By.textContains("Portal test")),3000);assertNotNull(selected);selected.click();device.waitForIdle();
+            String saved=ProxyStore.load(ctx);org.json.JSONObject config=ProxyConfig.parse(saved);assertEquals("vless",config.getString("type"));assertFalse(config.has("transport"));assertFalse(ctx.getSharedPreferences("proxy",0).getString("sealed","").contains("00000000-0000"));
+            assertFalse(Diagnostics.report(ctx).contains("localhost:"));assertFalse(Diagnostics.report(ctx).contains("00000000-0000"));responder.join(2000);
+        }finally{MainActivity.testSubscriptionClient=null;ProxyStore.clear(ctx);}
     }
     @Test public void fullVpnNativeShadowsocksTcpUdpAndCleanup()throws Exception{nativeProxy("shadowsocks");}
     @Test public void fullVpnNativeTrojanTlsTcpUdpAndCleanup()throws Exception{nativeProxy("trojan");}
