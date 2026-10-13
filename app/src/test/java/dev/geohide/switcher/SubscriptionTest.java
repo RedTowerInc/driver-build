@@ -14,7 +14,7 @@ public class SubscriptionTest {
     @Test public void plaintextAndBase64FilterWithoutWeakeningTls()throws Exception{
         String text=KEY+"\n"+KEY+"\n"+KEY.replace("type=raw","type=xhttp")+"\n"+KEY.replace("security=tls","security=none")+"\n"+KEY.replace("security=tls","security=tls&allowInsecure=1");
         ProxySubscription.Result plain=ProxySubscription.parse(bytes(text));assertEquals(1,plain.entries.size());assertEquals(1,plain.duplicates);assertEquals(3,plain.skippedCount());
-        assertTrue(plain.entries.get(0).label.contains("TCP"));assertFalse(plain.entries.get(0).label.contains("00000000"));assertTrue(plain.entries.get(0).label.contains("Portal TCP"));assertFalse(plain.summary().contains("vless://"));
+        assertFalse(ProxyConfig.parse(KEY.replace("type=raw","type=raw&headerType=")).has("transport"));assertTrue(plain.entries.get(0).label.contains("TCP"));assertFalse(plain.entries.get(0).label.contains("00000000"));assertTrue(plain.entries.get(0).label.contains("Portal TCP"));assertFalse(plain.summary().contains("vless://"));
         String encoded=Base64.getEncoder().encodeToString(bytes(text));assertEquals(plain.entries.size(),ProxySubscription.parse(bytes(encoded)).entries.size());
         String safe=KEY.replace("security=tls","security=tls&insecure=1");try{ProxyConfig.parse(safe);fail();}catch(ProxyConfig.Invalid expected){}
     }

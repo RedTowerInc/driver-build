@@ -35,7 +35,7 @@ final class ProxyConfig {
                 out.put("tls",tls);if(vless && query.containsKey("flow") && !query.get("flow").isEmpty())out.put("flow",query.get("flow"));
                 String type=query.getOrDefault("type","tcp");if("raw".equals(type))type="tcp";
                 if("xhttp".equals(type))throw new Invalid("XHTTP не поддерживается текущим VPN-ядром.");
-                if(!"none".equals(query.getOrDefault("headerType","none")))throw new Invalid("TCP с дополнительным HTTP-заголовком не поддерживается.");
+                if(!query.getOrDefault("headerType","").isEmpty() && !"none".equals(query.get("headerType")))throw new Invalid("TCP с дополнительным HTTP-заголовком не поддерживается.");
                 if("ws".equals(type)){JSONObject ws=new JSONObject().put("type","ws").put("path",query.getOrDefault("path","/"));if(query.containsKey("host"))ws.put("headers",new JSONObject().put("Host",query.get("host")));out.put("transport",ws);}
                 else if("grpc".equals(type))out.put("transport",new JSONObject().put("type","grpc").put("service_name",query.getOrDefault("serviceName","")));
                 else if(!"tcp".equals(type))throw new Invalid("Поддерживаются TCP, WebSocket и gRPC");
