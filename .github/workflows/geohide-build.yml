@@ -62,7 +62,7 @@ jobs:
       - name: SDK and build checks
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-          gradle :app:assembleDebug :probe:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug :app:assembleRelease :probe:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug :app:lintRelease --no-daemon --stacktrace
       - name: Public DNS availability
         if: matrix.api == 35
         continue-on-error: true
@@ -88,8 +88,8 @@ jobs:
         if: success() && matrix.api == 35
         run: |
           mkdir -p deliverables
-          cp app/build/outputs/apk/debug/app-debug.apk deliverables/GeoHideSwitch_v2.2.0_Android.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs deliverables/GeoHideSwitch_v2.2.0_Android.apk > deliverables/apk-signature.txt
+          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/GeoHideSwitch_v2.2.0_Android.apk
+          echo "Unsigned release; permanent signature applied locally after QA" > deliverables/apk-signature.txt
           mkdir -p deliverables/tools
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" deliverables/tools/
           sha256sum deliverables/GeoHideSwitch_v2.2.0_Android.apk > deliverables/SHA256.txt
