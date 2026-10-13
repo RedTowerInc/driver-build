@@ -6,15 +6,17 @@ android {
         applicationId 'dev.geohide.switcher'
         minSdk 28
         targetSdk 35
-        versionCode 20101
-        versionName '2.1.1'
+        versionCode 20200
+        versionName '2.2.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
+    packaging { jniLibs { useLegacyPackaging true; keepDebugSymbols += ["**/libsingbox.so"] } }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
+    testImplementation 'org.json:json:20250517'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:rules:1.6.1'

@@ -53,6 +53,16 @@ final class DnsPackets {
         for(String s:domain.split("\\.")){b.write(s.length());for(char c:s.toCharArray())b.write(c);}
         b.write(0);b.write(0);b.write(1);b.write(0);b.write(1);return b.toByteArray();
     }
+    static java.util.List<java.net.InetAddress> addresses(byte[] r)throws java.io.IOException{
+        java.util.List<java.net.InetAddress> result=new java.util.ArrayList<>();int at=questionEnd(r);if(at<0)throw new java.io.IOException("Invalid DNS question");
+        int count=u16(r,6);if(count>512)throw new java.io.IOException("Too many DNS answers");
+        for(int answer=0;answer<count;answer++){
+            int labels=0;
+            while(true){if(at>=r.length || ++labels>128)throw new java.io.IOException("Invalid DNS name");int len=r[at++]&255;if(len==0)break;if((len&192)==192){if(at>=r.length)throw new java.io.IOException("Invalid DNS pointer");at++;break;}if(len>63 || at+len>r.length)throw new java.io.IOException("Invalid DNS label");at+=len;}
+            if(at+10>r.length)throw new java.io.IOException("Invalid DNS record");int type=u16(r,at),klass=u16(r,at+2),len=u16(r,at+8);at+=10;if(at+len>r.length)throw new java.io.IOException("Invalid DNS data");
+            if(klass==1 && ((type==1 && len==4)||(type==28 && len==16)))result.add(java.net.InetAddress.getByAddress(Arrays.copyOfRange(r,at,at+len)));at+=len;
+        }return result;
+    }
     static byte[][] replies(Query q,byte[] dns,int identity){
         if(dns.length>65507)throw new IllegalArgumentException("DNS response too large");
         int udpLen=8+dns.length;byte[] udp=new byte[udpLen];

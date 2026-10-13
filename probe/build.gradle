@@ -1,0 +1,7 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'dev.geohide.probe'
+    compileSdk 35
+    defaultConfig { applicationId 'dev.geohide.probe'; minSdk 28; targetSdk 35; versionCode 1; versionName 'test-only' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

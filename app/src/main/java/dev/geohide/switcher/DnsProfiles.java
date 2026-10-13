@@ -6,7 +6,7 @@ import java.util.Arrays;
 /** Official endpoints checked on 2026-10-13. A profile never falls back to another provider. */
 final class DnsProfiles {
     enum Transport {
-        DOH("HTTPS · шифрование"), DOT("TLS · шифрование"), UDP("UDP · без шифрования");
+        AUTO("Авто · HTTPS/TLS"), DOH("HTTPS · шифрование"), DOT("TLS · шифрование"), UDP("UDP · без шифрования");
         final String label;Transport(String label){this.label=label;}
     }
     static final class Profile {
@@ -19,7 +19,7 @@ final class DnsProfiles {
             this.addresses=addresses.clone();plainAllowed=plain;this.initial=initial;
         }
         boolean supports(Transport t){return t!=Transport.UDP || plainAllowed;}
-        Transport[] transports(){return plainAllowed?Transport.values():new Transport[]{Transport.DOH,Transport.DOT};}
+        Transport[] transports(){return plainAllowed?Transport.values():new Transport[]{Transport.AUTO,Transport.DOH,Transport.DOT};}
         String dohHost(){return URI.create(dohUrl).getHost();}
         @Override public String toString(){return name;}
     }

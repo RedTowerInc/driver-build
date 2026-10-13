@@ -34,7 +34,7 @@ final class TlsFixture implements Closeable {
     DnsProfiles.Profile profile(String tlsHost){return new DnsProfiles.Profile("fixture","TLS fixture","Local test only",tlsHost,"https://"+tlsHost+":"+server.getLocalPort()+"/dns-query","https://localhost/",new String[]{"127.0.0.1"},false,DnsProfiles.Transport.DOH);}
     private void handle(Socket s){
         try(Socket sock=s){sock.setSoTimeout(4000);DataInputStream in=new DataInputStream(sock.getInputStream());OutputStream out=sock.getOutputStream();
-            byte[] q;
+            do { byte[] q;
             if(http){String first=in.readLine();if(first==null)return;int len=0;String line;
                 while((line=in.readLine())!=null && !line.isEmpty()){if(line.toLowerCase(Locale.ROOT).startsWith("content-length:"))len=Integer.parseInt(line.substring(15).trim());}
                 if(len<12 || len>65507)return;q=new byte[len];in.readFully(q);
@@ -44,6 +44,7 @@ final class TlsFixture implements Closeable {
             if(http){String header="HTTP/1.1 "+httpCode+" Test\r\nContent-Type: "+contentType+"\r\nContent-Length: "+r.length+"\r\nConnection: close\r\n";
                 if(!redirect.isEmpty())header+="Location: "+redirect+"\r\n";out.write((header+"\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));out.write(r);
             }else{DataOutputStream dos=new DataOutputStream(out);dos.writeShort(r.length);dos.write(r);}out.flush();
+            } while(!http && !server.isClosed());
         }catch(Exception ignored){}finally{clients.remove(s);}
     }
     static byte[] response(byte[] q){return response(q,8);}

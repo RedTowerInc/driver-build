@@ -10,7 +10,7 @@ import javax.net.ssl.*;
 import okhttp3.*;
 
 /** Cancel-safe, provider-isolated upstream. TLS trust and hostname verification are never disabled. */
-final class DnsUpstream implements Closeable {
+class DnsUpstream implements Closeable {
     interface Protector { boolean udp(DatagramSocket s); boolean tcp(Socket s); }
     static final String[] SERVERS=DnsProfiles.ALL[0].addresses;
     final Set<Closeable> sockets=ConcurrentHashMap.newKeySet();
@@ -25,6 +25,20 @@ final class DnsUpstream implements Closeable {
     private final SSLSocketFactory tlsFactory;
     private final AtomicInteger preferred=new AtomicInteger();
     private volatile boolean closed;
+    private DnsUpstream[] auto;
+    private volatile DnsProfiles.Transport actual;
+    private final ArrayBlockingQueue<TlsConnection> idle=new ArrayBlockingQueue<>(4);
+    private final Semaphore tlsSlots=new Semaphore(4);
+    private volatile int generation;
+    final AtomicInteger tlsCreated=new AtomicInteger(),tlsReused=new AtomicInteger();
+    private static final class TlsConnection {
+        final Socket raw;final SSLSocket tls;final String ip;final int generation;volatile long used;
+        TlsConnection(Socket raw,SSLSocket tls,String ip,int generation){this.raw=raw;this.tls=tls;this.ip=ip;this.generation=generation;used=System.nanoTime();}
+    }
+    DnsProfiles.Transport actualTransport(){return selection.transport==DnsProfiles.Transport.AUTO?actual:selection.transport;}
+    synchronized void prefer(DnsProfiles.Transport t){if(auto!=null && t!=null && auto[1].selection.transport==t){DnsUpstream first=auto[0];auto[0]=auto[1];auto[1]=first;}}
+    DnsUpstream(Protector p,DnsProfiles.Selection selection,DnsUpstream[] fixtures){this(p,selection);for(DnsUpstream child:auto)child.close();auto=fixtures.clone();}
+
     volatile String server="";
     // Preserved UDP constructor for the previous protocol tests and local packet fixture.
     DnsUpstream(Protector p,String[] servers,int port){this(p,new DnsProfiles.Selection(DnsProfiles.ALL[0],DnsProfiles.Transport.UDP),servers,port,null,null);}
@@ -43,6 +57,12 @@ final class DnsUpstream implements Closeable {
                 .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(true)
                 .connectionPool(new ConnectionPool(2,30,TimeUnit.SECONDS)).build();
         }else http=null;
+        if(selection.transport==DnsProfiles.Transport.AUTO){
+            DnsProfiles.Transport first=selection.profile.initial==DnsProfiles.Transport.DOH?DnsProfiles.Transport.DOH:DnsProfiles.Transport.DOT;
+            DnsProfiles.Transport second=first==DnsProfiles.Transport.DOH?DnsProfiles.Transport.DOT:DnsProfiles.Transport.DOH;
+            auto=new DnsUpstream[]{new DnsUpstream(p,new DnsProfiles.Selection(selection.profile,first)),new DnsUpstream(p,new DnsProfiles.Selection(selection.profile,second))};
+        }
+
     }
     private synchronized void track(Closeable s)throws IOException{if(closed){s.close();throw new IOException("Cancelled");}sockets.add(s);}
     private final class ManagedSocket extends Socket {
@@ -63,6 +83,11 @@ final class DnsUpstream implements Closeable {
     }
     byte[] resolve(byte[] query)throws IOException{
         if(closed)throw new IOException("Cancelled");
+        if(auto!=null){
+            IOException last=null;DnsUpstream[] candidates; synchronized(this){candidates=auto.clone();}
+            for(DnsUpstream child:candidates){if(closed)throw new IOException("Cancelled");try{byte[] r=child.resolve(query);actual=child.actualTransport();server=child.server;prefer(actual);return r;}catch(IOException e){last=e;}}
+            throw new IOException("Оба шифрованных режима не ответили",last);
+        }
         if(selection.transport==DnsProfiles.Transport.DOH)return doh(query);
         int first=Math.floorMod(preferred.get(),servers.length);
         long deadline=System.nanoTime()+6_000_000_000L;
@@ -97,13 +122,35 @@ final class DnsUpstream implements Closeable {
         try{s.connect(new InetSocketAddress(ip,port),700);s.setSoTimeout(700);return readDns(s,q);}
         finally{limit.cancel(false);s.close();}
     }
-    private byte[] dot(byte[] q,String ip)throws IOException{
-        Socket raw=socket(null,0);SSLSocket tls=null;ScheduledFuture<?> limit=LIMITS.schedule(()->{try{raw.close();}catch(IOException ignored){}},3500,TimeUnit.MILLISECONDS);
-        try{raw.connect(new InetSocketAddress(ip,port),1500);raw.setSoTimeout(1800);
-            tls=(SSLSocket)tlsFactory.createSocket(raw,selection.profile.tlsHost,port,true);track(tls);
-            SSLParameters params=tls.getSSLParameters();params.setEndpointIdentificationAlgorithm("HTTPS");params.setServerNames(Collections.singletonList(new SNIHostName(selection.profile.tlsHost)));tls.setSSLParameters(params);
-            tls.startHandshake();return readDns(tls,q);
-        }finally{limit.cancel(false);if(tls!=null){sockets.remove(tls);tls.close();}raw.close();}
+    private void discard(TlsConnection c){sockets.remove(c.tls);try{c.tls.close();}catch(IOException ignored){}try{c.raw.close();}catch(IOException ignored){}}
+    private static final class StaleConnection extends IOException {StaleConnection(IOException cause){super("Stale TLS connection",cause);}}
+    private byte[] dot(byte[] q,String ip)throws IOException{try{return dotAttempt(q,ip);}catch(StaleConnection e){if(closed)throw e;return dotAttempt(q,ip);}}
+    private byte[] dotAttempt(byte[] q,String ip)throws IOException{
+        boolean acquired=false,reused=false;TlsConnection conn=null;ScheduledFuture<?> limit=null;boolean success=false;
+        try{
+            try{acquired=tlsSlots.tryAcquire(1500,TimeUnit.MILLISECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException("Cancelled",e);}
+            if(!acquired)throw new SocketTimeoutException("TLS pool busy");
+            if(closed)throw new IOException("Cancelled");
+            TlsConnection candidate;
+            while((candidate=idle.poll())!=null){
+                if(candidate.generation==generation && candidate.ip.equals(ip) && !candidate.tls.isClosed() && System.nanoTime()-candidate.used<30_000_000_000L){conn=candidate;reused=true;tlsReused.incrementAndGet();break;}discard(candidate);
+            }
+            final Socket raw=conn==null?socket(null,0):conn.raw;
+            limit=LIMITS.schedule(()->{try{raw.close();}catch(IOException ignored){}},3500,TimeUnit.MILLISECONDS);
+            if(conn==null){
+                int startedGeneration=generation;SSLSocket tls=null;
+                try{raw.connect(new InetSocketAddress(ip,port),1500);raw.setSoTimeout(1800);
+                    tls=(SSLSocket)tlsFactory.createSocket(raw,selection.profile.tlsHost,port,true);track(tls);
+                    SSLParameters params=tls.getSSLParameters();params.setEndpointIdentificationAlgorithm("HTTPS");params.setServerNames(Collections.singletonList(new SNIHostName(selection.profile.tlsHost)));tls.setSSLParameters(params);tls.startHandshake();
+                    conn=new TlsConnection(raw,tls,ip,startedGeneration);tlsCreated.incrementAndGet();
+                }catch(IOException e){if(tls!=null){sockets.remove(tls);try{tls.close();}catch(IOException ignored){}}raw.close();throw e;}
+            }
+            byte[] result=readDns(conn.tls,q);success=true;return result;
+        }catch(IOException e){if(reused && !(e instanceof SocketTimeoutException) && !closed)throw new StaleConnection(e);throw e;}finally{
+            if(limit!=null)limit.cancel(false);
+            if(conn!=null){conn.used=System.nanoTime();synchronized(this){if(!success || closed || conn.generation!=generation || !idle.offer(conn))discard(conn);}}
+            if(acquired)tlsSlots.release();
+        }
     }
     private byte[] doh(byte[] q)throws IOException{
         Request request=new Request.Builder().url(selection.profile.dohUrl).header("Accept","application/dns-message")
@@ -121,8 +168,13 @@ final class DnsUpstream implements Closeable {
         }finally{calls.remove(call);}
     }
     private static void check(byte[] q,byte[] r)throws IOException{if(!DnsPackets.matches(q,r))throw new IOException("Invalid DNS response");}
-    void networkChanged(){if(http!=null)http.connectionPool().evictAll();}
-    @Override public synchronized void close(){closed=true;for(Call c:calls)c.cancel();calls.clear();
+    synchronized void networkChanged(){
+        generation++;
+        if(auto!=null)for(DnsUpstream child:auto)child.networkChanged();
+        if(http!=null)http.connectionPool().evictAll();
+        else {idle.clear();for(Closeable socket:sockets)try{socket.close();}catch(IOException ignored){}sockets.clear();}
+    }
+    @Override public synchronized void close(){closed=true;idle.clear();if(auto!=null)for(DnsUpstream child:auto)child.close();for(Call c:calls)c.cancel();calls.clear();
         if(http!=null){http.dispatcher().cancelAll();http.connectionPool().evictAll();http.dispatcher().executorService().shutdown();}
         for(Closeable s:sockets)try{s.close();}catch(IOException ignored){}sockets.clear();}
 }

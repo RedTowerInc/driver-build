@@ -6,4 +6,5 @@ collect() {
   timeout 10s adb logcat -d > qa/logcat.txt || true
 }
 trap collect EXIT
+adb install -r probe/build/outputs/apk/debug/probe-debug.apk
 gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace

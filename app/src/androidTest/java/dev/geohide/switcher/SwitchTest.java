@@ -45,7 +45,7 @@ public class SwitchTest {
         device.executeShellCommand("screencap -p /sdcard/Download/GeoHide-QA/"+name+".png");
     }
     @Before public void before()throws Exception{
-        DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.ALL[0],DnsProfiles.Transport.UDP));
+        DnsSettings.fullVpn(ctx,false);NetworkProfiles.testKind=null;DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.ALL[0],DnsProfiles.Transport.UDP));
         device=UiDevice.getInstance(ins);if(Build.VERSION.SDK_INT>=33)device.executeShellCommand("pm grant "+PKG+" android.permission.POST_NOTIFICATIONS");device.wakeUp();device.setOrientationNatural();
         fake=new DatagramSocket(0,InetAddress.getByName("127.0.0.1"));fake.setSoTimeout(300);
         DnsVpnService.testServers=new String[]{"127.0.0.1"};DnsVpnService.testPort=fake.getLocalPort();
@@ -58,7 +58,7 @@ public class SwitchTest {
     }
     @After public void after()throws Exception{
         ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));waitState(DnsVpnService.State.OFF);waitNoVpn();fake.close();responder.join(1000);
-        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
+        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;NetworkProfiles.testKind=null;DnsSettings.fullVpn(ctx,false);ProxyRuntime.testProbeUrl=null;ProxyRuntime.testDnsServer=null;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
         screenshot("01-off");
@@ -149,6 +149,48 @@ public class SwitchTest {
         click("transport");Thread.sleep(300);UiObject2 https=device.wait(Until.findObject(By.text("HTTPS · шифрование")),3000);assertNotNull(https);assertTrue(https.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
         click("profile");Thread.sleep(300);UiObject2 cf=device.wait(Until.findObject(By.text("Cloudflare 1.1.1.1")),3000);assertNotNull(cf);assertTrue(cf.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
         click("profile");Thread.sleep(300);ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOT,DnsSettings.load(ctx).transport);
+    }
+    @Test public void separateNetworkProfilesApplyDuringVpn()throws Exception{
+        NetworkProfiles.testKind="wifi";
+        DnsSettings.saveFor(ctx,"wifi",new DnsProfiles.Selection(DnsProfiles.find("dns_ai"),DnsProfiles.Transport.AUTO));
+        DnsSettings.saveFor(ctx,"mobile",new DnsProfiles.Selection(DnsProfiles.find("cloudflare"),DnsProfiles.Transport.DOH));
+        assertEquals("dns_ai",DnsSettings.loadFor(ctx,"wifi").profile.id);assertEquals("cloudflare",DnsSettings.loadFor(ctx,"mobile").profile.id);
+        click("power");grant();waitState(DnsVpnService.State.ON);assertEquals("dns_ai",DnsVpnService.current().choice.profile.id);
+        NetworkProfiles.testKind="mobile";DnsVpnService.instance.testNetworkChanged();long end=System.currentTimeMillis()+5000;
+        while(!"cloudflare".equals(DnsVpnService.current().choice.profile.id) && System.currentTimeMillis()<end)Thread.sleep(50);
+        assertEquals("cloudflare",DnsVpnService.current().choice.profile.id);waitState(DnsVpnService.State.ON);click("power");waitState(DnsVpnService.State.OFF);waitNoVpn();
+    }
+    @Test public void autoThroughTunAndReportExport()throws Exception{
+        DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.find("dns_ai"),DnsProfiles.Transport.AUTO));DnsVpnService.testServers=null;
+        try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false)){
+            DnsVpnService.testUpstream=new DnsUpstream(NetworkProfiles.protector(ctx),new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOT),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
+            click("power");grant();waitState(DnsVpnService.State.ON);assertEquals(DnsProfiles.Transport.AUTO,DnsVpnService.current().choice.transport);assertTrue(DnsVpnService.current().server.contains("TLS"));
+            try(DatagramSocket socket=new DatagramSocket()){socket.setSoTimeout(3000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);socket.receive(reply);assertEquals(8,b[reply.getLength()-1]);}
+            screenshot("07-auto-active");click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
+        }finally{DnsVpnService.testUpstream=null;}
+        EventLog.record("ss://do-not-export-secret","secret-mode",EventLog.Result.IO,1);
+        android.content.ContentValues values=new android.content.ContentValues();values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"GeoHide-QA-Diagnostics.txt");values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"text/plain");values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/GeoHide-QA");android.net.Uri file=ctx.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);assertNotNull(file);
+        Instrumentation.ActivityMonitor monitor=ins.addMonitor(new IntentFilter(Intent.ACTION_CREATE_DOCUMENT),new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(file)),true);
+        try{click("export_report");Thread.sleep(500);assertTrue(monitor.getHits()>0);try(InputStream in=ctx.getContentResolver().openInputStream(file)){assertNotNull(in);String report=new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertTrue(report.contains("GeoHide Switch"));assertTrue(report.contains("AUTO"));assertFalse(report.contains("do-not-export-secret"));}}
+        finally{ins.removeMonitor(monitor);ctx.getContentResolver().delete(file,null,null);}
+    }
+    @Test public void fullVpnNativeShadowsocksTcpUdpAndCleanup()throws Exception{
+        DnsVpnService.testServers=null;
+        try(ServerSocket http=new ServerSocket(0,10,InetAddress.getByName("127.0.0.1"));ServerSocket reserve=new ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))){
+            int remotePort=reserve.getLocalPort();reserve.close();java.util.concurrent.atomic.AtomicInteger hits=new java.util.concurrent.atomic.AtomicInteger();
+            Thread responder=new Thread(()->{while(!http.isClosed())try(Socket socket=http.accept()){socket.setSoTimeout(4000);BufferedReader input=new BufferedReader(new InputStreamReader(socket.getInputStream()));String line;while((line=input.readLine())!=null && !line.isEmpty()){}byte[] body="TUN-SS-OK".getBytes(java.nio.charset.StandardCharsets.UTF_8);OutputStream output=socket.getOutputStream();output.write(("HTTP/1.1 200 OK\r\nContent-Length: "+body.length+"\r\nConnection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));output.write(body);output.flush();hits.incrementAndGet();}catch(Exception ignored){}},"Remote-HTTP-fixture");responder.start();
+            org.json.JSONObject inbound=new org.json.JSONObject().put("type","shadowsocks").put("listen","127.0.0.1").put("listen_port",remotePort).put("method","aes-128-gcm").put("password","fixture-secret");
+            org.json.JSONObject rule=new org.json.JSONObject().put("ip_cidr",new org.json.JSONArray().put("198.18.77.1/32")).put("action","route-options").put("override_address","127.0.0.1").put("override_port",http.getLocalPort());
+            org.json.JSONObject server=new org.json.JSONObject().put("log",new org.json.JSONObject().put("disabled",true)).put("inbounds",new org.json.JSONArray().put(inbound)).put("outbounds",new org.json.JSONArray().put(new org.json.JSONObject().put("type","direct").put("tag","direct"))).put("route",new org.json.JSONObject().put("rules",new org.json.JSONArray().put(rule)).put("final","direct"));
+            try(CoreProcess remote=CoreProcess.start(ctx,server)){
+                Thread.sleep(500);String credentials=java.util.Base64.getEncoder().encodeToString("aes-128-gcm:fixture-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));ProxyStore.save(ctx,"ss://"+credentials+"@127.0.0.1:"+remotePort);assertFalse(ctx.getSharedPreferences("proxy",0).getString("sealed","").contains("fixture-secret"));
+                ProxyRuntime.testProbeUrl="http://198.18.77.1:"+http.getLocalPort()+"/";ProxyRuntime.testDnsServer=new org.json.JSONObject().put("type","udp").put("tag","test-dns").put("server","127.0.0.1").put("server_port",fake.getLocalPort()).put("detour","proxy");DnsSettings.fullVpn(ctx,true);
+                ctx.startActivity(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();click("power");grant();waitState(DnsVpnService.State.ON);assertTrue(DnsVpnService.current().full);assertNotNull(DnsVpnService.proxy());assertTrue(DnsVpnService.proxy().alive());screenshot("08-full-vpn-active");
+                ctx.startActivity(new Intent().setClassName("dev.geohide.probe","dev.geohide.probe.ProbeActivity").putExtra("url",ProxyRuntime.testProbeUrl).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));assertTrue(device.wait(Until.hasObject(By.text("VPN PROBE OK: TCP + UDP DNS")),16000));
+                assertTrue(hits.get()>=2);long[] stats=DnsVpnService.proxy().stats();assertTrue(stats[1]>0);assertTrue(stats[3]>0);
+                ctx.startActivity(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();ProxyRuntime saved=DnsVpnService.proxy();long began=System.currentTimeMillis();click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();assertFalse(saved.alive());assertTrue(System.currentTimeMillis()-began<4000);assertFalse(hasOngoingNotification());assertFalse(Diagnostics.report(ctx).contains("fixture-secret"));ProxyStore.clear(ctx);
+            }finally{http.close();responder.join(1000);}
+        }
     }
     private void waitNoVpn()throws Exception{long end=System.currentTimeMillis()+3000;while(vpnPresent() && System.currentTimeMillis()<end)Thread.sleep(50);assertFalse(vpnPresent());}
     private boolean vpnPresent(){ConnectivityManager cm=ctx.getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return true;}return false;}
