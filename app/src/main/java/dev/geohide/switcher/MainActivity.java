@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         networkButton.setText(NetworkProfiles.label(NetworkProfiles.kind(this))+" · профили сети");networkButton.setEnabled(!enabled && !permissionPending);
         DnsProfiles.Selection shown=enabled && s.choice!=null?s.choice:selection;
         profileButton.setText(full?"VPN-сервер · импортировать":shown.profile.name+" · Выбрать сервер");
-        profileInfo.setText(full?(ProxyStore.exists(this)?"Конфигурация сохранена · SS / VLESS / Trojan":"Нужен рабочий сервер · SS / VLESS / Trojan")+"\nDNS через туннель · приложение использует прокси для проверок":shown.profile.description);if(!full && NetworkProfiles.strictPrivateDns(this))profileInfo.append("\nЗадан системный Private DNS: проверьте его при расхождении результатов.");transportButton.setVisibility(full?View.GONE:View.VISIBLE);transportButton.setText("Подключение: "+shown.transport.label);
+        profileInfo.setText(full?(ProxyStore.exists(this)?"Конфигурация сохранена · SS / VLESS / Trojan":"Нужен рабочий сервер · SS / VLESS / Trojan")+"\nDNS: Cloudflare через VPN · проверки используют прокси":shown.profile.description);if(!full && NetworkProfiles.strictPrivateDns(this))profileInfo.append("\nЗадан системный Private DNS: проверьте его при расхождении результатов.");transportButton.setVisibility(full?View.GONE:View.VISIBLE);transportButton.setText("Подключение: "+shown.transport.label);
         boolean editable=!enabled && !permissionPending;profileButton.setEnabled(editable);transportButton.setEnabled(editable);
         profileButton.setAlpha(editable?1f:.55f);transportButton.setAlpha(editable?1f:.55f);
         String label;

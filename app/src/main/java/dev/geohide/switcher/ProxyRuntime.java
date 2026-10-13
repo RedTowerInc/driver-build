@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 final class ProxyRuntime implements AutoCloseable {
     static volatile String testProbeUrl;
     static volatile JSONObject testDnsServer;
+    static volatile String testCertificate;
     final DnsVpnService owner;
     private final TProxyService nativeTunnel=new TProxyService();
     private volatile boolean closed;
@@ -26,7 +27,7 @@ final class ProxyRuntime implements AutoCloseable {
     OkHttpClient http(){return client;}
     long[] stats(){return nativeTunnel.TProxyGetStats();}
     void start()throws Exception{
-        JSONObject outbound=ProxyConfig.parse(ProxyStore.load(owner));type=outbound.getString("type");
+        JSONObject outbound=ProxyConfig.parse(ProxyStore.load(owner));if(BuildConfig.DEBUG && testCertificate!=null && outbound.has("tls"))outbound.getJSONObject("tls").put("certificate",testCertificate);type=outbound.getString("type");
         String host=outbound.getString("server");String sni=host;
         android.net.Network net=NetworkProfiles.physical(owner);if(net==null)throw new IOException("Нет физической сети");
         InetAddress[] addresses=net.getAllByName(host);if(addresses.length==0)throw new UnknownHostException();
