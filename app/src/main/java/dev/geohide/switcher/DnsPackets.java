@@ -46,10 +46,11 @@ final class DnsPackets {
         byte[] r=Arrays.copyOf(q,end);r[2]=(byte)(0x80|(q[2]&0x79));r[3]=(byte)0x82;
         Arrays.fill(r,6,12,(byte)0);return r;
     }
-    static byte[] probe(int id){
+    static byte[] probe(int id){return probe(id,"example.com");}
+    static byte[] probe(int id,String domain){
         ByteArrayOutputStream b=new ByteArrayOutputStream();
         byte[] h=new byte[12];p16(h,0,id);h[2]=1;h[5]=1;b.write(h,0,h.length);
-        for(String s:"dnstest.geohide.ru".split("\\.")){b.write(s.length());for(char c:s.toCharArray())b.write(c);}
+        for(String s:domain.split("\\.")){b.write(s.length());for(char c:s.toCharArray())b.write(c);}
         b.write(0);b.write(0);b.write(1);b.write(0);b.write(1);return b.toByteArray();
     }
     static byte[][] replies(Query q,byte[] dns,int identity){

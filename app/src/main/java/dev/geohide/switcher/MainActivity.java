@@ -13,34 +13,41 @@ public class MainActivity extends Activity {
     private static final int BG=Color.rgb(11,17,19),LIME=Color.rgb(207,251,123),MUTED=Color.rgb(145,162,168);
     private final Handler handler=new Handler(Looper.getMainLooper());
     private PowerButton power;
-    private TextView status,detail,stats;
+    private TextView status,detail,stats,profileInfo;
+    private Button profileButton,transportButton;
+    private DnsProfiles.Selection selection;
     private boolean permissionPending,startingRequested;
     private final Runnable update=new Runnable(){public void run(){refresh();handler.postDelayed(this,250);}};
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER);return t;}
     private void add(LinearLayout root,View v,int h,int top){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,h);p.topMargin=dp(top);root.addView(v,p);}
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);permissionPending=saved!=null && saved.getBoolean("permissionPending");
+        super.onCreate(saved);selection=DnsSettings.load(this);permissionPending=saved!=null && saved.getBoolean("permissionPending");
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(BG);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(24),dp(24),dp(24),dp(24));scroll.addView(root);
         scroll.setOnApplyWindowInsetsListener((v,insets)->{root.setPadding(dp(24),dp(24)+insets.getSystemWindowInsetTop(),dp(24),dp(24)+insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        TextView title=text("GeoHide",36,Color.WHITE);title.setTypeface(null,Typeface.BOLD);add(root,title,-2,4);
+        TextView title=text("DNS Switch",32,Color.WHITE);title.setTypeface(null,Typeface.BOLD);add(root,title,-2,4);
         add(root,text("DNS ПОД ВАШИМ КОНТРОЛЕМ",12,MUTED),-2,4);
+        profileButton=roundedButton("",LIME,BG);profileButton.setId(R.id.profile);
+        add(root,profileButton,dp(50),18);profileButton.setOnClickListener(v->chooseProfile());
+        profileInfo=text("",13,MUTED);profileInfo.setId(R.id.profile_info);add(root,profileInfo,-2,8);
+        transportButton=roundedButton("",Color.WHITE,Color.rgb(30,40,43));transportButton.setId(R.id.transport);
+        add(root,transportButton,dp(44),10);transportButton.setOnClickListener(v->chooseTransport());
         power=new PowerButton();power.setId(R.id.power);power.setOnClickListener(v->toggle());
-        int width=getResources().getDisplayMetrics().widthPixels-dp(48);int diameter=Math.min(dp(248),width);
-        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(diameter,diameter);pp.topMargin=dp(32);root.addView(power,pp);
-        status=text("ВЫКЛЮЧЕНО",23,Color.WHITE);status.setId(R.id.status);add(root,status,-2,22);
+        int width=getResources().getDisplayMetrics().widthPixels-dp(48);int diameter=Math.min(dp(208),Math.min(width,(int)(getResources().getDisplayMetrics().heightPixels*.24f)));
+        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(diameter,diameter);pp.topMargin=dp(20);root.addView(power,pp);
+        status=text("ВЫКЛЮЧЕНО",23,Color.WHITE);status.setId(R.id.status);add(root,status,-2,14);
         detail=text("",15,MUTED);detail.setId(R.id.detail);add(root,detail,-2,12);
         stats=text("",12,MUTED);add(root,stats,-2,16);
         Button force=new Button(this);force.setId(R.id.force_stop);force.setText("Принудительно отключить");force.setAllCaps(false);force.setTextSize(15);force.setTextColor(Color.WHITE);
         GradientDrawable d=new GradientDrawable();d.setColor(Color.rgb(30,40,43));d.setCornerRadius(dp(26));force.setBackground(d);
-        add(root,force,dp(52),24);force.setOnClickListener(v->stop());
+        add(root,force,dp(52),16);force.setOnClickListener(v->stop());
         Button settings=new Button(this);settings.setText("Открыть настройки VPN");settings.setAllCaps(false);settings.setTextColor(MUTED);settings.setTextSize(14);settings.setBackgroundColor(Color.TRANSPARENT);
         add(root,settings,dp(48),8);settings.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_VPN_SETTINGS));}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}});
         add(root,text("Без root · локальный VPN только для DNS\nДругой VPN одновременно использовать нельзя.\nСобственный Secure DNS браузера может обходить приложение.",12,MUTED),-2,22);
-        add(root,text("GeoHide Switch 2.0 · неофициальный клиент\nGeoHide не является полноценным обходом DPI.",11,MUTED),-2,18);
+        add(root,text("GeoHide Switch 2.1 · выбор DNS\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
         setContentView(scroll);refresh();
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
@@ -55,13 +62,36 @@ public class MainActivity extends Activity {
         boolean enabled=connected || busy || s.state==DnsVpnService.State.WAITING;
         power.on=enabled;power.accent=connected;power.label=enabled?"Выключить":"Включить";
         if(permissionPending)power.label="Ожидаем разрешение";
-        power.setContentDescription(power.label+" GeoHide DNS");power.invalidate();
+        power.setContentDescription(power.label+" DNS");power.invalidate();
+        DnsProfiles.Selection shown=enabled && s.choice!=null?s.choice:selection;
+        profileButton.setText(shown.profile.name+" · Выбрать сервер");
+        profileInfo.setText(shown.profile.description);transportButton.setText("Подключение: "+shown.transport.label);
+        boolean editable=!enabled && !permissionPending;profileButton.setEnabled(editable);transportButton.setEnabled(editable);
+        profileButton.setAlpha(editable?1f:.55f);transportButton.setAlpha(editable?1f:.55f);
         String label;
         switch(s.state){case ON:label="DNS ВКЛЮЧЁН";break;case STARTING:label="ПОДКЛЮЧЕНИЕ…";break;case WAITING:label="НЕТ ОТВЕТА DNS";break;case ERROR:label="ОШИБКА";break;default:label="DNS ВЫКЛЮЧЕН";}
         status.setText(permissionPending?"РАЗРЕШЕНИЕ VPN…":startingRequested?"ПОДКЛЮЧЕНИЕ…":label);
         status.setTextColor(connected?LIME:s.state==DnsVpnService.State.ERROR || s.state==DnsVpnService.State.WAITING?Color.rgb(255,193,122):Color.WHITE);
         detail.setText(s.detail);
-        stats.setText((s.server.isEmpty()?"GeoHide DNS · UDP / 53":"Сервер: "+s.server)+"\nОтветов: "+s.answered+" · Ошибок: "+s.failed);
+        stats.setText((s.server.isEmpty()?shown.label():"Сервер: "+s.server)+"\nОтветов: "+s.answered+" · Ошибок: "+s.failed);
+    }
+    private Button roundedButton(String label,int foreground,int background){
+        Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setTextColor(foreground);
+        GradientDrawable d=new GradientDrawable();d.setColor(background);d.setCornerRadius(dp(24));b.setBackground(d);return b;
+    }
+    private void chooseProfile(){
+        String[] names=new String[DnsProfiles.ALL.length];int checked=0;
+        for(int i=0;i<names.length;i++){names[i]=DnsProfiles.ALL[i].name;if(DnsProfiles.ALL[i].id.equals(selection.profile.id))checked=i;}
+        new AlertDialog.Builder(this).setTitle("DNS-сервер").setSingleChoiceItems(names,checked,(dialog,which)->{
+            selection=DnsSettings.select(this,DnsProfiles.ALL[which].id);dialog.dismiss();refresh();
+        }).setNegativeButton("Отмена",null).show();
+    }
+    private void chooseTransport(){
+        DnsProfiles.Transport[] modes=selection.profile.transports();String[] labels=new String[modes.length];int checked=0;
+        for(int i=0;i<modes.length;i++){labels[i]=modes[i].label;if(modes[i]==selection.transport)checked=i;}
+        new AlertDialog.Builder(this).setTitle("Способ подключения").setSingleChoiceItems(labels,checked,(dialog,which)->{
+            selection=new DnsProfiles.Selection(selection.profile,modes[which]);DnsSettings.save(this,selection);dialog.dismiss();refresh();
+        }).setNegativeButton("Отмена",null).show();
     }
     private void toggle(){
         if(permissionPending)return;
@@ -71,7 +101,7 @@ public class MainActivity extends Activity {
         catch(Exception e){showError(e);}
     }
     private void connect(){
-        DnsVpnService.clearError();startingRequested=true;refresh();
+        DnsSettings.save(this,selection);DnsVpnService.clearError();startingRequested=true;refresh();
         try{startForegroundService(new Intent(this,DnsVpnService.class).setAction("START"));}
         catch(Exception e){startingRequested=false;showError(e);}handler.postDelayed(this::refresh,80);
     }

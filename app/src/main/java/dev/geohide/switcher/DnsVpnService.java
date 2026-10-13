@@ -15,8 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DnsVpnService extends VpnService {
     enum State { OFF, STARTING, ON, WAITING, ERROR }
     static final class Snapshot {
-        final State state;final String detail,server;final long answered,failed;
-        Snapshot(State s,String d,String ip,long a,long f){state=s;detail=d;server=ip;answered=a;failed=f;}
+        final State state;final String detail,server;final long answered,failed;final DnsProfiles.Selection choice;
+        Snapshot(State s,String d,String ip,long a,long f){this(s,d,ip,a,f,null);}
+        Snapshot(State s,String d,String ip,long a,long f,DnsProfiles.Selection choice){state=s;detail=d;server=ip;answered=a;failed=f;this.choice=choice;}
     }
     private static volatile Snapshot snapshot=new Snapshot(State.OFF,"Нажмите, чтобы включить DNS","",0,0);
     static Snapshot current(){return snapshot;}
@@ -24,6 +25,7 @@ public class DnsVpnService extends VpnService {
     // Package-private injection, only used by instrumentation in the same process.
     static volatile String[] testServers;
     static volatile int testPort=53;
+    static volatile DnsUpstream testUpstream;
     private final Handler main=new Handler(Looper.getMainLooper());
     private Session session;
     static DnsVpnService instance;
@@ -33,6 +35,7 @@ public class DnsVpnService extends VpnService {
     private long answered,failed;
     private static final class Session {
         final DnsUpstream upstream;
+        final DnsProfiles.Selection choice;
         final ExecutorService workers=new ThreadPoolExecutor(4,4,0,TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(64),new ThreadPoolExecutor.AbortPolicy());
         final ScheduledExecutorService health=Executors.newSingleThreadScheduledExecutor();
@@ -43,7 +46,7 @@ public class DnsVpnService extends VpnService {
         FileInputStream input;
         FileOutputStream output;
         Thread reader;
-        Session(DnsUpstream u){upstream=u;}
+        Session(DnsUpstream u,DnsProfiles.Selection choice){upstream=u;this.choice=choice;}
         void close(){
             cancelled=true;upstream.close();health.shutdownNow();workers.shutdownNow();
             if(reader!=null)reader.interrupt();
@@ -59,17 +62,19 @@ public class DnsVpnService extends VpnService {
         try{
             notification("Подключение…");
             if(VpnService.prepare(this)!=null)throw new IOException("Разрешение VPN не предоставлено");
-            String[] servers=BuildConfig.DEBUG && testServers!=null?testServers:DnsUpstream.SERVERS;
-            int port=BuildConfig.DEBUG && testServers!=null?testPort:53;
-            Session s=new Session(new DnsUpstream(new DnsUpstream.Protector(){
+            DnsProfiles.Selection choice=DnsSettings.load(this);
+            DnsUpstream.Protector protector=new DnsUpstream.Protector(){
                 public boolean udp(java.net.DatagramSocket x){return protect(x);}
                 public boolean tcp(java.net.Socket x){return protect(x);}
-            },servers,port));
-            session=s;publish(State.STARTING,"Проверяем ответ GeoHide…");
+            };
+            DnsUpstream upstream=BuildConfig.DEBUG && testUpstream!=null?testUpstream:
+                BuildConfig.DEBUG && testServers!=null?new DnsUpstream(protector,testServers,testPort):new DnsUpstream(protector,choice);
+            Session s=new Session(upstream,choice);
+            session=s;publish(State.STARTING,"Проверяем "+choice.profile.name+"…");
             s.workers.execute(()->{
                 try{
                     byte[] r=s.upstream.resolve(DnsPackets.probe(0x6e01));
-                    if((r[3]&15)!=0 || DnsPackets.u16(r,6)==0)throw new IOException("Проверочный домен GeoHide не разрешается");
+                    if((r[3]&15)!=0 || DnsPackets.u16(r,6)==0)throw new IOException("Проверочный домен не разрешается");
                     main.post(()->establish(s));
                 }catch(Exception e){main.post(()->{if(session==s)disconnect(State.ERROR,message(e));});}
             });
@@ -79,7 +84,7 @@ public class DnsVpnService extends VpnService {
     private void establish(Session s){
         if(session!=s || s.cancelled)return;
         try{
-            s.tun=new Builder().setSession("GeoHide DNS").setMtu(1500).setBlocking(false)
+            s.tun=new Builder().setSession(s.choice.label()).setMtu(1500).setBlocking(false)
                 .addAddress("10.77.77.2",32).addDnsServer("10.77.77.1").addRoute("10.77.77.1",32)
                 .allowFamily(OsConstants.AF_INET6).establish();
             if(s.tun==null)throw new IOException("Android отклонил подключение VPN");
@@ -92,19 +97,20 @@ public class DnsVpnService extends VpnService {
             };
             cm.registerNetworkCallback(new NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(),networkCallback);
-            publish(State.ON,"GeoHide отвечает · DNS включён");
+            publish(State.ON,s.choice.profile.name+" отвечает · DNS включён");
             s.health.scheduleWithFixedDelay(()->probe(s),15,15,TimeUnit.SECONDS);
         }catch(Exception e){disconnect(State.ERROR,message(e));}
     }
     private void checkNetwork(Session s){
         if(session!=s || s.cancelled)return;
-        // A new socket chooses the current underlying network; no old persistent sockets.
+        // Remove idle HTTPS sockets from the previous underlying network.
+        s.upstream.networkChanged();
         try{s.health.execute(()->probe(s));}catch(RejectedExecutionException ignored){}
     }
     private void probe(Session s){
         try{byte[] r=s.upstream.resolve(DnsPackets.probe(0x6e02));
             if((r[3]&15)!=0 || DnsPackets.u16(r,6)==0)throw new IOException("Нет ответа на проверочный домен");
-            main.post(()->{if(session==s)publish(State.ON,"GeoHide отвечает · DNS включён");});
+            main.post(()->{if(session==s)publish(State.ON,s.choice.profile.name+" отвечает · DNS включён");});
         }catch(IOException e){main.post(()->{if(session==s)publish(State.WAITING,"Нет ответа DNS. Можно отключить или дождаться сети.");});}
     }
     private void read(Session s){
@@ -127,7 +133,7 @@ public class DnsVpnService extends VpnService {
     private void forward(Session s,DnsPackets.Query q){
         byte[] r;
         try{r=s.upstream.resolve(q.dns);
-            main.post(()->{if(session==s){answered++;publish(State.ON,"GeoHide отвечает · DNS включён");}});
+            main.post(()->{if(session==s){answered++;publish(State.ON,s.choice.profile.name+" отвечает · DNS включён");}});
         }catch(IOException e){r=DnsPackets.failure(q.dns);
             main.post(()->{if(session==s){failed++;publish(State.WAITING,"Нет ответа DNS. Можно отключить или дождаться сети.");}});}
         write(s,q,r);
@@ -141,7 +147,7 @@ public class DnsVpnService extends VpnService {
     private static String message(Exception e){return e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();}
     private void publish(State state,String detail){
         State previous=snapshot.state;
-        snapshot=new Snapshot(state,detail,session==null?"":session.upstream.server,answered,failed);
+        snapshot=new Snapshot(state,detail,session==null?"":session.upstream.server,answered,failed,session==null?null:session.choice);
         if(session!=null && previous!=state)notification(state==State.ON?"DNS включён":detail);
     }
     private void notification(String text){
@@ -150,7 +156,7 @@ public class DnsVpnService extends VpnService {
         PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,DnsVpnService.class).setAction("STOP"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n=new Notification.Builder(this,"geo").setSmallIcon(R.drawable.ic_power).setContentTitle("GeoHide Switch")
-            .setContentText(text).setOngoing(true).setContentIntent(open)
+            .setContentText(session==null?text:session.choice.profile.name+" · "+text).setOngoing(true).setContentIntent(open)
             .addAction(new Notification.Action.Builder(R.drawable.ic_power,"Отключить",stop).build()).build();
         startForeground(NOTE,n);
     }

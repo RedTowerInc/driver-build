@@ -29,6 +29,12 @@ jobs:
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
           gradle :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+      - name: Public DNS availability
+        if: matrix.api == 35
+        continue-on-error: true
+        run: |
+          mkdir -p qa
+          gradle :app:publicDnsSmoke --no-daemon > qa/public-dns-smoke.txt 2>&1
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -48,13 +54,13 @@ jobs:
         if: success() && matrix.api == 35
         run: |
           mkdir -p deliverables
-          cp app/build/outputs/apk/debug/app-debug.apk deliverables/GeoHideSwitch_v2.0.0_Android.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs deliverables/GeoHideSwitch_v2.0.0_Android.apk > deliverables/apk-signature.txt
-          sha256sum deliverables/GeoHideSwitch_v2.0.0_Android.apk > deliverables/SHA256.txt
+          cp app/build/outputs/apk/debug/app-debug.apk deliverables/GeoHideSwitch_v2.1.0_Android.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs deliverables/GeoHideSwitch_v2.1.0_Android.apk > deliverables/apk-signature.txt
+          sha256sum deliverables/GeoHideSwitch_v2.1.0_Android.apk > deliverables/SHA256.txt
       - uses: actions/upload-artifact@v4
         if: success() && matrix.api == 35
         with:
-          name: GeoHideSwitch-v2.0.0-APK
+          name: GeoHideSwitch-v2.1.0-APK
           path: deliverables/
       - uses: actions/upload-artifact@v4
         if: always()
