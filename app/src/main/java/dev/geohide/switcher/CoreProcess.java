@@ -9,7 +9,7 @@ final class CoreProcess implements AutoCloseable {
     private static final StringBuilder TEST_LOG=new StringBuilder();
     static synchronized String testLog(){return TEST_LOG.toString();}
     static synchronized void clearTestLog(){TEST_LOG.setLength(0);}
-    private static synchronized void captured(String text){if(BuildConfig.DEBUG && testCapture){TEST_LOG.append(text);if(TEST_LOG.length()>18000)TEST_LOG.delete(0,TEST_LOG.length()-18000);}}
+    private static synchronized void captured(String text){if(BuildConfig.DEBUG && testCapture){TEST_LOG.append(text.replace((char)27,' '));if(TEST_LOG.length()>18000)TEST_LOG.delete(0,TEST_LOG.length()-18000);}}
     final Process process;private final File config;
     private CoreProcess(Process process,File config){this.process=process;this.config=config;drain(process);}
     static String executable(Context c){return c.getApplicationInfo().nativeLibraryDir+"/libsingbox.so";}
