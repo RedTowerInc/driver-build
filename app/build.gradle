@@ -22,8 +22,11 @@ dependencies {
     androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
 }
 
+configurations { smokeJvm }
+dependencies { smokeJvm 'com.squareup.okhttp3:okhttp-jvm:5.3.2' }
+
 tasks.register('publicDnsSmoke', JavaExec) {
     dependsOn 'testDebugUnitTest'
-    classpath = files("$buildDir/intermediates/javac/debugUnitTest/compileDebugUnitTestJavaWithJavac/classes", "$buildDir/intermediates/javac/debug/compileDebugJavaWithJavac/classes") + configurations.debugUnitTestRuntimeClasspath
+    classpath = files("$buildDir/intermediates/javac/debugUnitTest/compileDebugUnitTestJavaWithJavac/classes", "$buildDir/intermediates/javac/debug/compileDebugJavaWithJavac/classes") + configurations.smokeJvm
     mainClass = 'dev.geohide.switcher.PublicDnsSmoke'
 }

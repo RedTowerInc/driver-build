@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
         setContentView(scroll);refresh();
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
-    @Override protected void onResume(){super.onResume();handler.removeCallbacks(update);update.run();}
+    @Override protected void onResume(){super.onResume();selection=DnsSettings.load(this);handler.removeCallbacks(update);update.run();}
     @Override protected void onPause(){handler.removeCallbacks(update);super.onPause();}
     @Override protected void onSaveInstanceState(Bundle b){b.putBoolean("permissionPending",permissionPending);super.onSaveInstanceState(b);}
     private void refresh(){
@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
         catch(Exception e){showError(e);}
     }
     private void connect(){
-        DnsSettings.save(this,selection);DnsVpnService.clearError();startingRequested=true;refresh();
+        selection=DnsSettings.load(this);DnsVpnService.clearError();startingRequested=true;refresh();
         try{startForegroundService(new Intent(this,DnsVpnService.class).setAction("START"));}
         catch(Exception e){startingRequested=false;showError(e);}handler.postDelayed(this::refresh,80);
     }

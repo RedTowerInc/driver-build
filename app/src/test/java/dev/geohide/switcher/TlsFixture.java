@@ -46,9 +46,12 @@ final class TlsFixture implements Closeable {
             }else{DataOutputStream dos=new DataOutputStream(out);dos.writeShort(r.length);dos.write(r);}out.flush();
         }catch(Exception ignored){}finally{clients.remove(s);}
     }
-    static byte[] response(byte[] q){int end=DnsPackets.questionEnd(q);boolean a=DnsPackets.u16(q,end-4)==1;byte[] r=Arrays.copyOf(q,end+(a?16:0));
-        r[2]=(byte)0x81;r[3]=(byte)0x80;DnsPackets.p16(r,6,a?1:0);DnsPackets.p16(r,8,0);DnsPackets.p16(r,10,0);
-        if(a){int n=end;r[n]=(byte)0xc0;r[n+1]=0x0c;r[n+3]=1;r[n+5]=1;r[n+9]=60;r[n+11]=4;r[n+12]=(byte)203;r[n+13]=0;r[n+14]=113;r[n+15]=8;}return r;
+    static byte[] response(byte[] q){return response(q,8);}
+    static byte[] response(byte[] q,int last){int end=DnsPackets.questionEnd(q);int type=DnsPackets.u16(q,end-4);int size=type==1?4:type==28?16:0;
+        byte[] r=Arrays.copyOf(q,end+(size>0?12+size:0));r[2]=(byte)0x81;r[3]=(byte)0x80;DnsPackets.p16(r,6,size>0?1:0);DnsPackets.p16(r,8,0);DnsPackets.p16(r,10,0);
+        if(size>0){int n=end;r[n]=(byte)0xc0;r[n+1]=0x0c;DnsPackets.p16(r,n+2,type);r[n+5]=1;r[n+9]=60;r[n+11]=(byte)size;
+            if(type==1){r[n+12]=(byte)203;r[n+14]=113;}else{r[n+12]=0x20;r[n+13]=1;r[n+14]=0x0d;r[n+15]=(byte)0xb8;}
+            r[n+11+size]=(byte)last;}return r;
     }
     void awaitRequest()throws Exception{long end=System.currentTimeMillis()+4000;while(requests.get()==0 && System.currentTimeMillis()<end)Thread.sleep(10);if(requests.get()==0)throw new IOException("Test request did not reach TLS server");}
     @Override public void close()throws IOException{server.close();for(Socket s:clients)s.close();workers.shutdownNow();}

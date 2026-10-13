@@ -51,18 +51,14 @@ public class SwitchTest {
         DnsVpnService.testServers=new String[]{"127.0.0.1"};DnsVpnService.testPort=fake.getLocalPort();
         responder=new Thread(()->{while(!fake.isClosed())try{
             byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);fake.receive(p);if(silent)continue;
-            byte[] q=Arrays.copyOf(b,p.getLength());int end=DnsPackets.questionEnd(q);if(end<0)continue;
-            boolean a=DnsPackets.u16(q,end-4)==1;byte[] r=Arrays.copyOf(q,end+(a?16:0));
-            r[2]=(byte)0x81;r[3]=(byte)0x80;DnsPackets.p16(r,6,a?1:0);DnsPackets.p16(r,8,0);DnsPackets.p16(r,10,0);
-            if(a){int n=end;r[n]=(byte)0xc0;r[n+1]=0x0c;r[n+3]=1;r[n+5]=1;r[n+9]=60;r[n+11]=4;
-            r[n+12]=(byte)203;r[n+13]=0;r[n+14]=113;r[n+15]=7;}
+            byte[] q=Arrays.copyOf(b,p.getLength());if(DnsPackets.questionEnd(q)<0)continue;byte[] r=TlsFixture.response(q,7);
             fake.send(new DatagramPacket(r,r.length,p.getSocketAddress()));
         }catch(SocketTimeoutException ignored){}catch(Exception e){if(!fake.isClosed())throw new RuntimeException(e);}},"FakeDNS");responder.start();
         activity=ins.startActivitySync(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
     }
     @After public void after()throws Exception{
-        ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));fake.close();responder.join(1000);
-        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;device.unfreezeRotation();ins.runOnMainSync(()->activity.finish());
+        ctx.startService(new Intent(ctx,DnsVpnService.class).setAction("STOP"));waitState(DnsVpnService.State.OFF);waitNoVpn();fake.close();responder.join(1000);
+        DnsVpnService.testServers=null;DnsVpnService.testUpstream=null;device.unfreezeRotation();ins.runOnMainSync(()->{Set<Activity> all=new HashSet<>();for(Stage stage:new Stage[]{Stage.RESUMED,Stage.PAUSED,Stage.STOPPED})all.addAll(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage));for(Activity a:all)a.finish();});
     }
     @Test public void vpnSwitchAndDnsPacketEndToEnd()throws Exception{
         screenshot("01-off");
@@ -79,7 +75,7 @@ public class SwitchTest {
         ConnectivityManager cm=ctx.getSystemService(ConnectivityManager.class);
         Network vpn=null;
         for(Network n:cm.getAllNetworks()){NetworkCapabilities cap=cm.getNetworkCapabilities(n);if(cap!=null && cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN))vpn=n;}
-        assertNotNull(vpn);InetAddress[] systemAnswer=vpn.getAllByName("dnstest.geohide.ru");assertTrue(systemAnswer.length>0);
+        assertNotNull(vpn);InetAddress[] systemAnswer=vpn.getAllByName("example.com");assertTrue(systemAnswer.length>0);
         // Loss and restoration of upstream response must be visible, with VPN still stoppable.
         silent=true;
         try(DatagramSocket client=new DatagramSocket()){
@@ -115,7 +111,7 @@ public class SwitchTest {
         assertFalse(hasOngoingNotification());
     }
     @Test public void profileChoicePersistenceAndEncryptedVpn()throws Exception{
-        click("profile");UiObject2 ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);ai.click();device.waitForIdle();
+        click("profile");screenshot("05-providers-menu");Thread.sleep(300);UiObject2 ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();
         assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
         click("transport");assertFalse(device.hasObject(By.text("UDP · без шифрования")));device.pressBack();
         device.setOrientationLeft();Thread.sleep(500);device.setOrientationNatural();Thread.sleep(500);
@@ -131,7 +127,7 @@ public class SwitchTest {
             try(DatagramSocket client=new DatagramSocket()){client.setSoTimeout(4000);byte[] q=DnsPackets.probe(151);client.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);client.receive(p);assertEquals(8,b[p.getLength()-1]);}
             assertTrue(tls.requests.get()>0);click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         }finally{DnsVpnService.testUpstream=null;}
-        click("profile");UiObject2 cf=device.wait(Until.findObject(By.text("Cloudflare 1.1.1.1")),3000);assertNotNull(cf);cf.click();device.waitForIdle();assertEquals("cloudflare",DnsSettings.load(ctx).profile.id);
+        click("profile");Thread.sleep(300);UiObject2 cf=device.wait(Until.findObject(By.text("Cloudflare 1.1.1.1")),3000);assertNotNull(cf);assertTrue(cf.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals("cloudflare",DnsSettings.load(ctx).profile.id);
         DnsVpnService.testServers=new String[]{"127.0.0.1"};click("power");grant();waitState(DnsVpnService.State.ON);assertEquals("cloudflare",DnsVpnService.current().choice.profile.id);click("power");waitState(DnsVpnService.State.OFF);waitNoVpn();
     }
     private void waitNoVpn()throws Exception{long end=System.currentTimeMillis()+3000;while(vpnPresent() && System.currentTimeMillis()<end)Thread.sleep(50);assertFalse(vpnPresent());}
