@@ -174,7 +174,7 @@ public class SwitchTest {
         }finally{DnsVpnService.testUpstream=null;}
         EventLog.record("ss://do-not-export-secret","secret-mode",EventLog.Result.IO,1);
         android.content.ContentValues values=new android.content.ContentValues();values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"GeoHide-QA-Diagnostics.txt");values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"text/plain");values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/GeoHide-QA");android.net.Uri file=ctx.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);assertNotNull(file);
-        IntentFilter documentFilter=new IntentFilter(Intent.ACTION_CREATE_DOCUMENT);documentFilter.addDataType("text/plain");
+        IntentFilter documentFilter=new IntentFilter(Intent.ACTION_CREATE_DOCUMENT);documentFilter.addDataType("text/plain");documentFilter.addCategory(Intent.CATEGORY_OPENABLE);
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(documentFilter,new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(file)),true);
         try{click("export_report");Thread.sleep(500);assertTrue(monitor.getHits()>0);try(InputStream in=ctx.getContentResolver().openInputStream(file)){assertNotNull(in);String report=new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertTrue(report.contains("GeoHide Switch"));assertTrue(report.contains("AUTO"));assertFalse(report.contains("do-not-export-secret"));}}
         finally{ins.removeMonitor(monitor);ctx.getContentResolver().delete(file,null,null);}
