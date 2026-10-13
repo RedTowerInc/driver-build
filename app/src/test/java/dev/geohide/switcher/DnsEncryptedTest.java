@@ -13,7 +13,7 @@ public class DnsEncryptedTest {
     }
     @Test public void profilesAreIsolatedAndAiCannotUsePlainDns(){
         assertEquals(5,DnsProfiles.ALL.length);DnsProfiles.Profile ai=DnsProfiles.find("dns_ai");assertFalse(ai.supports(DnsProfiles.Transport.UDP));
-        assertEquals(DnsProfiles.Transport.DOH,DnsProfiles.normalize(ai,"UDP"));assertEquals("dns.dns-ai.ru",ai.dohHost());
+        assertEquals(DnsProfiles.Transport.DOT,DnsProfiles.normalize(ai,"UDP"));assertEquals("dns.dns-ai.ru",ai.dohHost());
         try{new DnsProfiles.Selection(ai,DnsProfiles.Transport.UDP);fail();}catch(IllegalArgumentException expected){}
         assertEquals("geohide",DnsProfiles.find("invalid").id);
         for(DnsProfiles.Profile p:DnsProfiles.ALL){assertTrue(p.dohUrl.startsWith("https://"));assertTrue(p.addresses.length>=2);}

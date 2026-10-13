@@ -27,7 +27,7 @@ final class DnsProfiles {
         new Profile("geohide","GeoHide","Доступ к выбранным зарубежным сайтам через Smart DNS.","dns.geohide.ru","https://dns.geohide.ru/dns-query","https://geohide.ru/",
             new String[]{"193.233.112.68","193.233.112.67","193.233.112.88","45.155.204.190","37.230.192.51","46.8.158.6","159.194.200.33"},true,Transport.UDP),
         new Profile("dns_ai","DNS-AI · dns-ai.ru","AI-сервисы для РФ/Беларуси, фильтрация рекламы и трекеров. Только шифрованное подключение.","dns.dns-ai.ru","https://dns.dns-ai.ru/dns-query","https://dns-ai.ru/",
-            new String[]{"192.144.59.14","186.246.49.127","2a0d:8480:0:67c::14","2a0a:2b41:0:500d::53"},false,Transport.DOH),
+            new String[]{"192.144.59.14","186.246.49.127","2a0d:8480:0:67c::14","2a0a:2b41:0:500d::53"},false,Transport.DOT),
         new Profile("cloudflare","Cloudflare 1.1.1.1","Обычный публичный DNS без фильтра рекламы. Не предназначен для обхода геоблокировок.","one.one.one.one","https://cloudflare-dns.com/dns-query","https://developers.cloudflare.com/1.1.1.1/",
             new String[]{"1.1.1.1","1.0.0.1","2606:4700:4700::1111","2606:4700:4700::1001"},true,Transport.DOH),
         new Profile("adguard","AdGuard DNS","Фильтрация рекламных, отслеживающих и опасных доменов. Не удаляет всю рекламу внутри приложений.","dns.adguard-dns.com","https://dns.adguard-dns.com/dns-query","https://adguard-dns.io/en/public-dns.html",

@@ -112,23 +112,43 @@ public class SwitchTest {
     }
     @Test public void profileChoicePersistenceAndEncryptedVpn()throws Exception{
         click("profile");screenshot("05-providers-menu");Thread.sleep(300);UiObject2 ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();
-        assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
+        assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);assertEquals(DnsProfiles.Transport.DOT,DnsSettings.load(ctx).transport);
         click("transport");assertFalse(device.hasObject(By.text("UDP · без шифрования")));device.pressBack();
         device.setOrientationLeft();Thread.sleep(500);device.setOrientationNatural();Thread.sleep(500);
         assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);
         screenshot("05-dns-ai-selected");
         DnsVpnService.testServers=null;
-        try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),true)){
+        try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false)){
             DnsUpstream.Protector protector=new DnsUpstream.Protector(){public boolean udp(DatagramSocket s){return DnsVpnService.instance!=null && DnsVpnService.instance.protect(s);}public boolean tcp(Socket s){return DnsVpnService.instance!=null && DnsVpnService.instance.protect(s);}};
-            DnsVpnService.testUpstream=new DnsUpstream(protector,new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOH),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
+            DnsVpnService.testUpstream=new DnsUpstream(protector,new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOT),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
             click("power");grant();waitState(DnsVpnService.State.ON);assertEquals("dns_ai",DnsVpnService.current().choice.profile.id);
             UiObject2 picker=device.findObject(By.res(PKG,"profile"));assertNotNull(picker);assertFalse(picker.isEnabled());
-            assertTrue(DnsVpnService.current().server.contains("HTTPS"));screenshot("06-dns-ai-https-active");
+            assertTrue(DnsVpnService.current().server.contains("TLS"));assertEquals(DnsProfiles.Transport.DOT,DnsVpnService.current().choice.transport);screenshot("06-dns-ai-tls-active");
             try(DatagramSocket client=new DatagramSocket()){client.setSoTimeout(4000);byte[] q=DnsPackets.probe(151);client.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[4096];DatagramPacket p=new DatagramPacket(b,b.length);client.receive(p);assertEquals(8,b[p.getLength()-1]);}
             assertTrue(tls.requests.get()>0);click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         }finally{DnsVpnService.testUpstream=null;}
         click("profile");Thread.sleep(300);UiObject2 cf=device.wait(Until.findObject(By.text("Cloudflare 1.1.1.1")),3000);assertNotNull(cf);assertTrue(cf.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals("cloudflare",DnsSettings.load(ctx).profile.id);
         DnsVpnService.testServers=new String[]{"127.0.0.1"};click("power");grant();waitState(DnsVpnService.State.ON);assertEquals("cloudflare",DnsVpnService.current().choice.profile.id);click("power");waitState(DnsVpnService.State.OFF);waitNoVpn();
+    }
+    @Test public void defaultModesAndLegacyPreferences()throws Exception{
+        // Simulate preferences written by 2.1.0 and verify the one-time migration.
+        ctx.getSharedPreferences("dns_profiles",Context.MODE_PRIVATE).edit().clear().putString("profile","dns_ai").putString("transport_dns_ai","DOH").commit();
+        assertEquals(DnsProfiles.Transport.DOT,DnsSettings.load(ctx).transport);
+        DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.find("dns_ai"),DnsProfiles.Transport.DOH));
+        assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport); // manual override survives load
+        for(String id:new String[]{"cloudflare","adguard","quad9"}){
+            DnsSettings.save(ctx,new DnsProfiles.Selection(DnsProfiles.find(id),DnsProfiles.Transport.DOT));
+            assertEquals(DnsProfiles.Transport.DOH,DnsSettings.select(ctx,id).transport);
+            assertEquals(DnsProfiles.Transport.DOT,DnsSettings.select(ctx,"dns_ai").transport);
+        }
+        assertEquals(DnsProfiles.Transport.UDP,DnsSettings.select(ctx,"geohide").transport);
+        // Exercise the same reset through the actual selector UI.
+        ctx.startActivity(new Intent(ctx,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));device.waitForIdle();
+        click("profile");Thread.sleep(300);UiObject2 ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();
+        assertEquals(DnsProfiles.Transport.DOT,DnsSettings.load(ctx).transport);
+        click("transport");Thread.sleep(300);UiObject2 https=device.wait(Until.findObject(By.text("HTTPS · шифрование")),3000);assertNotNull(https);assertTrue(https.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
+        click("profile");Thread.sleep(300);UiObject2 cf=device.wait(Until.findObject(By.text("Cloudflare 1.1.1.1")),3000);assertNotNull(cf);assertTrue(cf.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOH,DnsSettings.load(ctx).transport);
+        click("profile");Thread.sleep(300);ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();assertEquals(DnsProfiles.Transport.DOT,DnsSettings.load(ctx).transport);
     }
     private void waitNoVpn()throws Exception{long end=System.currentTimeMillis()+3000;while(vpnPresent() && System.currentTimeMillis()<end)Thread.sleep(50);assertFalse(vpnPresent());}
     private boolean vpnPresent(){ConnectivityManager cm=ctx.getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return true;}return false;}

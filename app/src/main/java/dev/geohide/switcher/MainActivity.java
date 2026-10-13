@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
         Button settings=new Button(this);settings.setText("Открыть настройки VPN");settings.setAllCaps(false);settings.setTextColor(MUTED);settings.setTextSize(14);settings.setBackgroundColor(Color.TRANSPARENT);
         add(root,settings,dp(48),8);settings.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_VPN_SETTINGS));}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}});
         add(root,text("Без root · локальный VPN только для DNS\nДругой VPN одновременно использовать нельзя.\nСобственный Secure DNS браузера может обходить приложение.",12,MUTED),-2,22);
-        add(root,text("GeoHide Switch 2.1 · выбор DNS\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
+        add(root,text("GeoHide Switch 2.1.1 · выбор DNS\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
         setContentView(scroll);refresh();
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
