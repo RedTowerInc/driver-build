@@ -68,7 +68,7 @@ public class DnsVpnService extends VpnService {
         networkCallback=new ConnectivityManager.NetworkCallback(){public void onAvailable(Network n){scheduleNetwork(s);}public void onLost(Network n){scheduleNetwork(s);}public void onCapabilitiesChanged(Network n,NetworkCapabilities c){scheduleNetwork(s);}};
         cm.registerNetworkCallback(new NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(),networkCallback);
     }
-    private void scheduleNetwork(Session s){main.post(()->{if(session!=s || s.cancelled)return;if(s.networkTask!=null)main.removeCallbacks(s.networkTask);s.networkTask=()->checkNetwork(s);main.postDelayed(s.networkTask,400);});}
+    private void scheduleNetwork(Session s){NetworkProfiles.invalidate();main.post(()->{if(session!=s || s.cancelled)return;if(s.networkTask!=null)main.removeCallbacks(s.networkTask);s.networkTask=()->checkNetwork(s);main.postDelayed(s.networkTask,400);});}
     void testNetworkChanged(){if(BuildConfig.DEBUG){Session s=session;if(s!=null)main.post(()->checkNetwork(s));}}
     private void checkNetwork(Session s){
         if(session!=s || s.cancelled)return;String key=key();if(key.equals(s.key))return;s.key=key;String kind=NetworkProfiles.kind(this);EventLog.record(s.proxy!=null?"vpn":s.choice.profile.id,s.proxy!=null?"VPN":s.choice.transport.name(),EventLog.Result.NETWORK,0);

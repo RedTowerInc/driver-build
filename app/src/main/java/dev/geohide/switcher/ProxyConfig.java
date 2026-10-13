@@ -12,7 +12,7 @@ final class ProxyConfig {
         JSONObject out;
         if(input.startsWith("{"))out=new JSONObject(input);
         else{
-            if(input.startsWith("ss://") && !input.substring(5).split("#",2)[0].contains("@")){String raw=input.substring(5).split("#",2)[0];input="ss://"+b64(raw);}
+            if(input.startsWith("ss://") && !input.substring(5).split("#",2)[0].contains("@")){String raw=input.substring(5).split("#",2)[0];String decoded=b64(raw);int at=decoded.lastIndexOf('@');if(at<1)throw new IllegalArgumentException("Неверная ссылка SS");input="ss://"+java.net.URLEncoder.encode(decoded.substring(0,at),"UTF-8").replace("+","%20")+decoded.substring(at);}
             URI uri=new URI(input);String scheme=uri.getScheme();String host=uri.getHost();int port=uri.getPort();
             if(host==null || port<1 || port>65535 || uri.getRawUserInfo()==null)throw new IllegalArgumentException("Нужна ссылка с сервером, портом и учётными данными");
             Map<String,String> query=new HashMap<>();if(uri.getRawQuery()!=null)for(String field:uri.getRawQuery().split("&")){String[] pair=field.split("=",2);query.put(decode(pair[0]),pair.length>1?decode(pair[1]):"");}
@@ -30,6 +30,7 @@ final class ProxyConfig {
                 if(query.containsKey("alpn"))tls.put("alpn",new JSONArray(Arrays.asList(query.get("alpn").split(","))));
                 String fingerprint=query.getOrDefault("fp","chrome");
                 if("reality".equals(security)){tls.put("reality",new JSONObject().put("enabled",true).put("public_key",query.getOrDefault("pbk","")).put("short_id",query.getOrDefault("sid","")));tls.put("utls",new JSONObject().put("enabled",true).put("fingerprint",fingerprint));}
+                if(query.containsKey("fp") && !tls.has("utls"))tls.put("utls",new JSONObject().put("enabled",true).put("fingerprint",fingerprint));
                 out.put("tls",tls);if(vless && query.containsKey("flow") && !query.get("flow").isEmpty())out.put("flow",query.get("flow"));
                 String type=query.getOrDefault("type","tcp");
                 if("ws".equals(type)){JSONObject ws=new JSONObject().put("type","ws").put("path",query.getOrDefault("path","/"));if(query.containsKey("host"))ws.put("headers",new JSONObject().put("Host",query.get("host")));out.put("transport",ws);}
@@ -47,10 +48,13 @@ final class ProxyConfig {
         if("shadowsocks".equals(type)){
             if(!METHODS.contains(out.optString("method")))throw new IllegalArgumentException("Требуется современное AEAD-шифрование Shadowsocks");
             if(out.optString("password").isEmpty())throw new IllegalArgumentException("Не задан пароль");
+            if(out.optString("method").startsWith("2022-")){int length=out.getString("method").contains("aes-128")?16:32;for(String key:out.getString("password").split(":",-1))if(Base64.getDecoder().decode(key).length!=length)throw new IllegalArgumentException("Неверная длина ключа Shadowsocks 2022");}
         }else{
             if("vless".equals(type))UUID.fromString(out.getString("uuid"));else if(out.optString("password").isEmpty())throw new IllegalArgumentException("Не задан пароль");
             JSONObject tls=out.optJSONObject("tls");if(tls==null || !tls.optBoolean("enabled") || tls.optBoolean("insecure"))throw new IllegalArgumentException("Требуется TLS с проверкой сертификата");
             Set<String> tlsFields=new HashSet<>(Arrays.asList("enabled","server_name","alpn","min_version","max_version","utls","reality"));for(Iterator<String> i=tls.keys();i.hasNext();)if(!tlsFields.contains(i.next()))throw new IllegalArgumentException("Неподдерживаемая настройка TLS");
+            if(tls.has("min_version") && !Arrays.asList("1.2","1.3").contains(tls.getString("min_version")))throw new IllegalArgumentException("Требуется TLS 1.2 или новее");
+            if(tls.has("max_version") && !Arrays.asList("1.2","1.3").contains(tls.getString("max_version")))throw new IllegalArgumentException("Требуется TLS 1.2 или новее");
             if(tls.optString("server_name").isEmpty())tls.put("server_name",out.getString("server"));
             JSONObject reality=tls.optJSONObject("reality");if(reality!=null && reality.optBoolean("enabled")){
                 if(!"vless".equals(type))throw new IllegalArgumentException("REALITY поддерживается для VLESS");

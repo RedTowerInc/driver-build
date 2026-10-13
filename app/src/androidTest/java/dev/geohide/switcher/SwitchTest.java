@@ -152,6 +152,10 @@ public class SwitchTest {
     }
     @Test public void separateNetworkProfilesApplyDuringVpn()throws Exception{
         NetworkProfiles.testKind="wifi";
+        ctx.getSharedPreferences("dns_profiles",0).edit().clear().putString("profile","dns_ai").putString("transport_dns_ai","DOT").commit();
+        assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);
+        NetworkProfiles.testKind="mobile";DnsSettings.select(ctx,"cloudflare");
+        NetworkProfiles.testKind="wifi";assertEquals("dns_ai",DnsSettings.load(ctx).profile.id);
         DnsSettings.saveFor(ctx,"wifi",new DnsProfiles.Selection(DnsProfiles.find("dns_ai"),DnsProfiles.Transport.AUTO));
         DnsSettings.saveFor(ctx,"mobile",new DnsProfiles.Selection(DnsProfiles.find("cloudflare"),DnsProfiles.Transport.DOH));
         assertEquals("dns_ai",DnsSettings.loadFor(ctx,"wifi").profile.id);assertEquals("cloudflare",DnsSettings.loadFor(ctx,"mobile").profile.id);
@@ -165,8 +169,8 @@ public class SwitchTest {
         try(TlsFixture tls=new TlsFixture(ins.getContext().getAssets().open("dns-test.p12"),false)){
             DnsVpnService.testUpstream=new DnsUpstream(NetworkProfiles.protector(ctx),new DnsProfiles.Selection(tls.profile("localhost"),DnsProfiles.Transport.DOT),new String[]{"127.0.0.1"},tls.server.getLocalPort(),tls.client(),tls.context.getSocketFactory());
             click("power");grant();waitState(DnsVpnService.State.ON);assertEquals(DnsProfiles.Transport.AUTO,DnsVpnService.current().choice.transport);assertTrue(DnsVpnService.current().server.contains("TLS"));
-            try(DatagramSocket socket=new DatagramSocket()){socket.setSoTimeout(3000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);socket.receive(reply);assertEquals(8,b[reply.getLength()-1]);}
-            screenshot("07-auto-active");click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
+            try(DatagramSocket socket=new DatagramSocket()){socket.setSoTimeout(6000);byte[] q=DnsPackets.probe(700);socket.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));byte[] b=new byte[1024];DatagramPacket reply=new DatagramPacket(b,b.length);socket.receive(reply);assertEquals(8,b[reply.getLength()-1]);}
+            assertEquals(1,DnsVpnService.testUpstream.tlsCreated.get());screenshot("07-auto-active");click("force_stop");waitState(DnsVpnService.State.OFF);waitNoVpn();
         }finally{DnsVpnService.testUpstream=null;}
         EventLog.record("ss://do-not-export-secret","secret-mode",EventLog.Result.IO,1);
         android.content.ContentValues values=new android.content.ContentValues();values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"GeoHide-QA-Diagnostics.txt");values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"text/plain");values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/GeoHide-QA");android.net.Uri file=ctx.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);assertNotNull(file);

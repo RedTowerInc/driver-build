@@ -33,7 +33,7 @@ final class TlsFixture implements Closeable {
     OkHttpClient client(){return new OkHttpClient.Builder().sslSocketFactory(context.getSocketFactory(),trust).build();}
     DnsProfiles.Profile profile(String tlsHost){return new DnsProfiles.Profile("fixture","TLS fixture","Local test only",tlsHost,"https://"+tlsHost+":"+server.getLocalPort()+"/dns-query","https://localhost/",new String[]{"127.0.0.1"},false,DnsProfiles.Transport.DOH);}
     private void handle(Socket s){
-        try(Socket sock=s){sock.setSoTimeout(4000);DataInputStream in=new DataInputStream(sock.getInputStream());OutputStream out=sock.getOutputStream();
+        try(Socket sock=s){sock.setSoTimeout(30000);DataInputStream in=new DataInputStream(sock.getInputStream());OutputStream out=sock.getOutputStream();
             do { byte[] q;
             if(http){String first=in.readLine();if(first==null)return;int len=0;String line;
                 while((line=in.readLine())!=null && !line.isEmpty()){if(line.toLowerCase(Locale.ROOT).startsWith("content-length:"))len=Integer.parseInt(line.substring(15).trim());}

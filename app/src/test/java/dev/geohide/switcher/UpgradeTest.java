@@ -27,7 +27,7 @@ public class UpgradeTest {
     }
     @Test public void modernSsAndLegacyShareLinksParse()throws Exception{
         String credentials=Base64.getEncoder().encodeToString("aes-128-gcm:p+a:ss".getBytes(java.nio.charset.StandardCharsets.UTF_8));JSONObject parsed=ProxyConfig.parse("ss://"+credentials+"@127.0.0.1:8388#test");assertEquals("p+a:ss",parsed.getString("password"));assertEquals("shadowsocks",parsed.getString("type"));
-        String entire=Base64.getEncoder().encodeToString("aes-256-gcm:secret@127.0.0.1:8388".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals("secret",ProxyConfig.parse("ss://"+entire).getString("password"));
+        String entire=Base64.getEncoder().encodeToString("aes-256-gcm:secret@?#/plus+@127.0.0.1:8388".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals("secret@?#/plus+",ProxyConfig.parse("ss://"+entire).getString("password"));
         JSONObject root=ProxyConfig.client(parsed,1234,"u","p");assertEquals("proxy",root.getJSONObject("route").getString("final"));assertEquals("https",root.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("type"));
     }
     @Test public void vlessRealityAndTrojanTlsParse()throws Exception{
