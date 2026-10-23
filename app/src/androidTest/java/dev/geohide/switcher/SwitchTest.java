@@ -65,6 +65,7 @@ public class SwitchTest {
         // The permission dialog must not activate VPN when cancelled.
         if(VpnService.prepare(ctx)!=null){click("power");UiObject2 cancel=device.wait(Until.findObject(By.res("android","button2")),4000);assertNotNull(cancel);cancel.click();waitState(DnsVpnService.State.OFF);}
         click("power");grant();waitState(DnsVpnService.State.ON);Thread.sleep(500);screenshot("02-on");
+        ins.runOnMainSync(()->assertFalse("DNS settings refresh must not replace an active session",activity.findViewById(R.id.refresh_dns).isEnabled()));
         // A real packet enters Android's VPN TUN, reaches the upstream and comes back.
         try(DatagramSocket client=new DatagramSocket()){
             client.setSoTimeout(4000);byte[] q=DnsPackets.probe(1111);client.send(new DatagramPacket(q,q.length,InetAddress.getByName("10.77.77.1"),53));
@@ -109,6 +110,13 @@ public class SwitchTest {
         // Exercise onRevoke callback separately from normal onDestroy.
         ins.runOnMainSync(()->{assertNotNull(DnsVpnService.instance);DnsVpnService.instance.onRevoke();});waitState(DnsVpnService.State.OFF);waitNoVpn();
         assertFalse(hasOngoingNotification());
+    }
+    @Test public void dnsRefreshControlAndBuiltinNodesArePresent()throws Exception{
+        assertEquals(5,DnsProfiles.all().length);
+        assertEquals("194.87.196.13",DnsProfiles.find("dns_ai").addresses[0]);
+        assertEquals(DnsProfiles.Transport.DOT,DnsProfiles.find("dns_ai").initial);
+        ins.runOnMainSync(()->{assertTrue(activity.findViewById(R.id.refresh_dns).isEnabled());assertNotNull(activity.findViewById(R.id.dns_catalog));});
+        String report=Diagnostics.report(ctx);assertTrue(report.contains("2026-10-18"));
     }
     @Test public void profileChoicePersistenceAndEncryptedVpn()throws Exception{
         click("profile");screenshot("05-providers-menu");Thread.sleep(300);UiObject2 ai=device.wait(Until.findObject(By.text("DNS-AI · dns-ai.ru")),3000);assertNotNull(ai);assertTrue(ai.clickAndWait(Until.newWindow(),3000));device.waitForIdle();

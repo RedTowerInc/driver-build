@@ -3,6 +3,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 final class DnsSettings {
     private static SharedPreferences prefs(Context c){
+        DnsCatalog.initialize(c);
         SharedPreferences s=c.getSharedPreferences("dns_profiles",Context.MODE_PRIVATE);
         if(s.getInt("transport_defaults_version",0)<1){SharedPreferences.Editor e=s.edit().putInt("transport_defaults_version",1);if("DOH".equals(s.getString("transport_dns_ai",null)))e.putString("transport_dns_ai","DOT");e.apply();}
         return s;

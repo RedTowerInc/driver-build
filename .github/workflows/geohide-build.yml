@@ -1,34 +1,22 @@
 name: GeoHide Android APK and device QA
 on:
   push:
-    branches: [geohide-switch-20261010]
+    branches: [geohide-switch-20261010, geohide-dns-refresh-20261024]
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   native:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
+      - uses: actions/download-artifact@v4
         with:
-          packages: platform-tools
-      - uses: actions/cache@v4
-        with:
-          path: build/native-deps
-          key: geohide-native-sing1143-hev2180-ndk27-16kb-v2
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.5'
-          cache: false
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: geohide-go1255-sing1143-utls-v1
-      - run: bash scripts/build-native.sh
+          name: GeoHide-Native
+          path: app/src/main
+          run-id: 38411542645
+          github-token: ${{ github.token }}
       - uses: actions/upload-artifact@v4
         with:
           name: GeoHide-Native
@@ -88,15 +76,15 @@ jobs:
         if: success() && matrix.api == 35
         run: |
           mkdir -p deliverables
-          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/GeoHideSwitch_v2.2.1_Android.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk deliverables/GeoHideSwitch_v2.2.2_Android.apk
           echo "Unsigned release; permanent signature applied locally after QA" > deliverables/apk-signature.txt
           mkdir -p deliverables/tools
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" deliverables/tools/
-          sha256sum deliverables/GeoHideSwitch_v2.2.1_Android.apk > deliverables/SHA256.txt
+          sha256sum deliverables/GeoHideSwitch_v2.2.2_Android.apk > deliverables/SHA256.txt
       - uses: actions/upload-artifact@v4
         if: success() && matrix.api == 35
         with:
-          name: GeoHideSwitch-v2.2.1-APK
+          name: GeoHideSwitch-v2.2.2-APK
           path: deliverables/
       - uses: actions/upload-artifact@v4
         if: always()

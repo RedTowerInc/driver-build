@@ -13,8 +13,9 @@ public class MainActivity extends Activity {
     private static final int BG=Color.rgb(11,17,19),LIME=Color.rgb(207,251,123),MUTED=Color.rgb(145,162,168);
     private final Handler handler=new Handler(Looper.getMainLooper());
     private PowerButton power;
-    private TextView status,detail,stats,profileInfo;
-    private Button profileButton,transportButton,modeButton,networkButton;
+    private TextView status,detail,stats,profileInfo,catalogInfo;
+    private Button profileButton,transportButton,modeButton,networkButton,refreshDnsButton;
+    private DnsConfigUpdater configUpdater;
     private Diagnostics diagnostic;
     private SubscriptionLoader subscription;
     private AlertDialog loadingSubscription;
@@ -52,19 +53,21 @@ public class MainActivity extends Activity {
         stats=text("",12,MUTED);add(root,stats,-2,16);
         Button check=roundedButton("Проверить сервис",Color.WHITE,Color.rgb(30,40,43));check.setId(R.id.diagnostics);add(root,check,dp(46),14);check.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Что проверить?").setItems(Diagnostics.NAMES,(dialog,which)->checkService(which)).setNegativeButton("Отмена",null).show());
         Button report=roundedButton("Сохранить отчёт диагностики",MUTED,BG);report.setId(R.id.export_report);add(root,report,dp(44),6);report.setOnClickListener(v->exportReport());
+        refreshDnsButton=roundedButton("Обновить настройки DNS",Color.WHITE,Color.rgb(30,40,43));refreshDnsButton.setId(R.id.refresh_dns);add(root,refreshDnsButton,dp(46),10);refreshDnsButton.setOnClickListener(v->refreshDns());
+        catalogInfo=text("",11,MUTED);catalogInfo.setId(R.id.dns_catalog);add(root,catalogInfo,-2,8);
         Button force=new Button(this);force.setId(R.id.force_stop);force.setText("Принудительно отключить");force.setAllCaps(false);force.setTextSize(15);force.setTextColor(Color.WHITE);
         GradientDrawable d=new GradientDrawable();d.setColor(Color.rgb(30,40,43));d.setCornerRadius(dp(26));force.setBackground(d);
         add(root,force,dp(52),16);force.setOnClickListener(v->stop());
         Button settings=new Button(this);settings.setText("Открыть настройки VPN");settings.setAllCaps(false);settings.setTextColor(MUTED);settings.setTextSize(14);settings.setBackgroundColor(Color.TRANSPARENT);
         add(root,settings,dp(48),8);settings.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_VPN_SETTINGS));}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}});
         add(root,text("Без root · DNS либо полный VPN\nДругой VPN одновременно использовать нельзя.\nСобственный Secure DNS браузера может обходить приложение.",12,MUTED),-2,22);
-        add(root,text("GeoHide Switch 2.2.1 · DNS и VPN\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
+        add(root,text("GeoHide Switch 2.2.2 · DNS и VPN\nDNS не заменяет полноценный обход DPI.",11,MUTED),-2,18);
         setContentView(scroll);refresh();
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},23);
     }
     @Override protected void onResume(){super.onResume();selection=DnsSettings.load(this);handler.removeCallbacks(update);update.run();}
-    @Override protected void onPause(){handler.removeCallbacks(update);if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}cancelSubscription();super.onPause();}
-    @Override protected void onDestroy(){if(diagnostic!=null)diagnostic.cancel();cancelSubscription();checks.shutdownNow();super.onDestroy();}
+    @Override protected void onPause(){handler.removeCallbacks(update);if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}cancelSubscription();cancelConfigUpdate();super.onPause();}
+    @Override protected void onDestroy(){if(diagnostic!=null)diagnostic.cancel();cancelSubscription();cancelConfigUpdate();checks.shutdownNow();super.onDestroy();}
     @Override protected void onSaveInstanceState(Bundle b){b.putBoolean("permissionPending",permissionPending);b.putString("pendingReport",pendingReport);super.onSaveInstanceState(b);}
     private void refresh(){
         if(power==null)return;DnsVpnService.Snapshot s=DnsVpnService.current();
@@ -74,15 +77,16 @@ public class MainActivity extends Activity {
         boolean enabled=connected || busy || s.state==DnsVpnService.State.WAITING;
         power.on=enabled;power.accent=connected;power.label=enabled?"Выключить":"Включить";
         if(permissionPending)power.label="Ожидаем разрешение";
-        power.setContentDescription(power.label+" подключение");power.invalidate();
+        power.setContentDescription(power.label+" подключение");power.setEnabled(configUpdater==null);power.invalidate();
         if(!enabled && !permissionPending)selection=DnsSettings.load(this);
         boolean full=enabled?s.full:DnsSettings.fullVpn(this);
-        modeButton.setText(full?"Режим: полный VPN":"Режим: только DNS");modeButton.setEnabled(!enabled && !permissionPending);
-        networkButton.setText(NetworkProfiles.label(NetworkProfiles.kind(this))+" · профили сети");networkButton.setEnabled(!enabled && !permissionPending);
+        modeButton.setText(full?"Режим: полный VPN":"Режим: только DNS");modeButton.setEnabled(!enabled && !permissionPending && configUpdater==null);
+        networkButton.setText(NetworkProfiles.label(NetworkProfiles.kind(this))+" · профили сети");networkButton.setEnabled(!enabled && !permissionPending && configUpdater==null);
         DnsProfiles.Selection shown=enabled && s.choice!=null?s.choice:selection;
         profileButton.setText(full?"VPN-сервер · импортировать":shown.profile.name+" · Выбрать сервер");
         profileInfo.setText(full?(ProxyStore.exists(this)?"Конфигурация сохранена · SS / VLESS / Trojan":"Нужен рабочий сервер · SS / VLESS / Trojan")+"\nDNS: Cloudflare через VPN · проверки используют прокси":shown.profile.description);if(!full && NetworkProfiles.strictPrivateDns(this))profileInfo.append("\nЗадан системный Private DNS: проверьте его при расхождении результатов.");transportButton.setVisibility(full?View.GONE:View.VISIBLE);transportButton.setText("Подключение: "+shown.transport.label);
-        boolean editable=!enabled && !permissionPending;profileButton.setEnabled(editable);transportButton.setEnabled(editable);
+        boolean editable=!enabled && !permissionPending && configUpdater==null;profileButton.setEnabled(editable);transportButton.setEnabled(editable);
+        refreshDnsButton.setEnabled(editable);refreshDnsButton.setText(configUpdater==null?"Обновить настройки DNS":"Обновляю настройки DNS…");catalogInfo.setText(DnsCatalog.summary(this)+(enabled?"\nДля обновления сначала отключите подключение.":""));
         profileButton.setAlpha(editable?1f:.55f);transportButton.setAlpha(editable?1f:.55f);
         String label;
         switch(s.state){case ON:label=full?"VPN ВКЛЮЧЁН":"DNS ВКЛЮЧЁН";break;case STARTING:label="ПОДКЛЮЧЕНИЕ…";break;case WAITING:label=full?"НЕТ СЕТИ":"НЕТ ОТВЕТА DNS";break;case ERROR:label="ОШИБКА";break;default:label=full?"VPN ВЫКЛЮЧЕН":"DNS ВЫКЛЮЧЕН";}
@@ -97,10 +101,10 @@ public class MainActivity extends Activity {
         GradientDrawable d=new GradientDrawable();d.setColor(background);d.setCornerRadius(dp(24));b.setBackground(d);return b;
     }
     private void chooseProfile(){
-        String[] names=new String[DnsProfiles.ALL.length];int checked=0;
-        for(int i=0;i<names.length;i++){names[i]=DnsProfiles.ALL[i].name;if(DnsProfiles.ALL[i].id.equals(selection.profile.id))checked=i;}
+        DnsProfiles.Profile[] profiles=DnsProfiles.all();String[] names=new String[profiles.length];int checked=0;
+        for(int i=0;i<names.length;i++){names[i]=profiles[i].name;if(profiles[i].id.equals(selection.profile.id))checked=i;}
         new AlertDialog.Builder(this).setTitle("DNS-сервер").setSingleChoiceItems(names,checked,(dialog,which)->{
-            selection=DnsSettings.select(this,DnsProfiles.ALL[which].id);dialog.dismiss();refresh();
+            selection=DnsSettings.select(this,profiles[which].id);dialog.dismiss();refresh();
         }).setNegativeButton("Отмена",null).show();
     }
     private void chooseTransport(){
@@ -111,7 +115,7 @@ public class MainActivity extends Activity {
         }).setNegativeButton("Отмена",null).show();
     }
     private void toggle(){
-        if(permissionPending)return;
+        if(permissionPending || configUpdater!=null)return;
         DnsVpnService.State s=DnsVpnService.current().state;
         if(startingRequested || s==DnsVpnService.State.ON || s==DnsVpnService.State.STARTING || s==DnsVpnService.State.WAITING){stop();return;}
         try{Intent prepare=VpnService.prepare(this);if(prepare!=null){permissionPending=true;refresh();startActivityForResult(prepare,22);}else connect();}
@@ -122,7 +126,7 @@ public class MainActivity extends Activity {
         try{startForegroundService(new Intent(this,DnsVpnService.class).setAction("START"));}
         catch(Exception e){startingRequested=false;showError(e);}handler.postDelayed(this::refresh,80);
     }
-    private void stop(){if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}permissionPending=false;startingRequested=false;try{startService(new Intent(this,DnsVpnService.class).setAction("STOP"));}catch(Exception e){showError(e);}DnsVpnService.clearError();handler.postDelayed(this::refresh,80);refresh();}
+    private void stop(){cancelConfigUpdate();if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}permissionPending=false;startingRequested=false;try{startService(new Intent(this,DnsVpnService.class).setAction("STOP"));}catch(Exception e){showError(e);}DnsVpnService.clearError();handler.postDelayed(this::refresh,80);refresh();}
     private void showError(Exception e){new AlertDialog.Builder(this).setTitle("Не удалось включить DNS").setMessage(e.getMessage()).setPositiveButton("Понятно",null).show();}
     @Override protected void onActivityResult(int rc,int result,Intent data){super.onActivityResult(rc,result,data);if(rc==24){String report=pendingReport;pendingReport=null;if(result==RESULT_OK && data!=null && data.getData()!=null && report!=null){try(java.io.OutputStream out=getContentResolver().openOutputStream(data.getData(),"wt")){if(out==null)throw new java.io.IOException();out.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));Toast.makeText(this,"Отчёт сохранён",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Не удалось сохранить отчёт",Toast.LENGTH_LONG).show();}}return;}if(rc==22){boolean requested=permissionPending;permissionPending=false;if(requested && result==RESULT_OK)connect();refresh();}}
     private void chooseMode(){new AlertDialog.Builder(this).setTitle("Режим подключения").setSingleChoiceItems(new String[]{"Только DNS · GeoHide / DNS-AI / другие","Полный VPN · импорт сервера или подписки"},DnsSettings.fullVpn(this)?1:0,(dialog,which)->{DnsSettings.fullVpn(this,which==1);dialog.dismiss();refresh();}).setNegativeButton("Отмена",null).show();}
@@ -161,9 +165,9 @@ public class MainActivity extends Activity {
     private void networkProfiles(){
         String[] kinds={"wifi","mobile","other"};String[] items=new String[3];for(int i=0;i<3;i++)items[i]=NetworkProfiles.label(kinds[i])+": "+DnsSettings.loadFor(this,kinds[i]).label();
         new AlertDialog.Builder(this).setTitle("Профили DNS по типу сети").setItems(items,(d,index)->{
-            String kind=kinds[index];String[] names=new String[DnsProfiles.ALL.length];for(int i=0;i<names.length;i++)names[i]=DnsProfiles.ALL[i].name;
+            String kind=kinds[index];DnsProfiles.Profile[] profiles=DnsProfiles.all();String[] names=new String[profiles.length];for(int i=0;i<names.length;i++)names[i]=profiles[i].name;
             new AlertDialog.Builder(this).setTitle(NetworkProfiles.label(kind)+" · DNS").setItems(names,(pd,which)->{
-                DnsProfiles.Profile profile=DnsProfiles.ALL[which];DnsProfiles.Transport[] modes=profile.transports();String[] labels=new String[modes.length];for(int i=0;i<labels.length;i++)labels[i]=modes[i].label;
+                DnsProfiles.Profile profile=profiles[which];DnsProfiles.Transport[] modes=profile.transports();String[] labels=new String[modes.length];for(int i=0;i<labels.length;i++)labels[i]=modes[i].label;
                 new AlertDialog.Builder(this).setTitle(profile.name+" · режим").setItems(labels,(md,mode)->{DnsSettings.saveFor(this,kind,new DnsProfiles.Selection(profile,modes[mode]));selection=DnsSettings.load(this);refresh();}).setNegativeButton("Отмена",null).show();
             }).setNegativeButton("Отмена",null).show();
         }).setNegativeButton("Закрыть",null).show();
@@ -174,6 +178,18 @@ public class MainActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Проверка сервиса").setView(result).setPositiveButton("Закрыть",null).setNeutralButton("Сохранить отчёт",(d,w)->exportReport()).create();dialog.setOnDismissListener(d->{if(diagnostic==task){task.cancel();diagnostic=null;}});dialog.show();
         checks.execute(()->{String text=task.run(index);handler.post(()->{if(diagnostic==task && !isFinishing())result.setText(text);});});
     }
+    private void refreshDns(){
+        DnsVpnService.State state=DnsVpnService.current().state;
+        if(configUpdater!=null || permissionPending || startingRequested || (state!=DnsVpnService.State.OFF && state!=DnsVpnService.State.ERROR))return;
+        if(diagnostic!=null){diagnostic.cancel();diagnostic=null;}
+        DnsConfigUpdater task=new DnsConfigUpdater(this);configUpdater=task;refresh();
+        checks.execute(()->{String result=task.run();handler.post(()->{
+            if(configUpdater!=task || isFinishing() || isDestroyed())return;
+            configUpdater=null;if(task.updated())DnsVpnService.clearError();selection=DnsSettings.load(this);refresh();
+            new AlertDialog.Builder(this).setTitle("Настройки DNS").setMessage(result).setPositiveButton("Понятно",null).show();
+        });});
+    }
+    private void cancelConfigUpdate(){DnsConfigUpdater task=configUpdater;configUpdater=null;if(task!=null)task.close();}
     private void exportReport(){pendingReport=Diagnostics.report(this);Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain").putExtra(Intent.EXTRA_TITLE,"GeoHideSwitch-Diagnostics-"+new java.text.SimpleDateFormat("yyyyMMdd-HHmmss",java.util.Locale.ROOT).format(new java.util.Date())+".txt");try{startActivityForResult(intent,24);}catch(Exception e){pendingReport=null;Toast.makeText(this,"На устройстве недоступен выбор файла",Toast.LENGTH_LONG).show();}}
     private class PowerButton extends View {
         final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);boolean on,accent;String label="Включить";

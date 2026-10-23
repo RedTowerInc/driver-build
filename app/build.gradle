@@ -6,8 +6,8 @@ android {
         applicationId 'dev.geohide.switcher'
         minSdk 28
         targetSdk 35
-        versionCode 20201
-        versionName '2.2.1'
+        versionCode 20202
+        versionName '2.2.2'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     packaging { jniLibs { useLegacyPackaging true; keepDebugSymbols += ["**/libsingbox.so"] } }

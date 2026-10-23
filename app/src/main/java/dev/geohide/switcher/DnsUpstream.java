@@ -99,9 +99,9 @@ class DnsUpstream implements Closeable {
                 if((r[2]&2)!=0)r=tcp(query,servers[i]);
                 if((r[3]&15)==2 || (r[3]&15)==5)throw new IOException("DNS refused the query");
                 preferred.set(i);server=servers[i]+(selection.transport==DnsProfiles.Transport.DOT?" · TLS":" · UDP");return r;
-            }catch(IOException e){last=e;}
+            }catch(IOException e){last=e;preferred.compareAndSet(i,(i+1)%servers.length);}
         }
-        throw new IOException(closed?"Cancelled":selection.profile.name+" не отвечает"+(last instanceof SSLException?": ошибка TLS-сертификата":""),last);
+        throw new IOException(closed?"Cancelled":selection.profile.name+": "+EventLog.label(EventLog.category(last)),last);
     }
     private byte[] udp(byte[] q,String ip)throws IOException{
         DatagramSocket s=new DatagramSocket();

@@ -7,6 +7,20 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 public class DnsUpstreamTest {
     private static final DnsUpstream.Protector PASS=new DnsUpstream.Protector(){public boolean udp(DatagramSocket s){return true;}public boolean tcp(Socket s){return true;}};
+    @Test(timeout=16000) public void nextRequestContinuesPastNodesThatConsumedTheBudget()throws Exception{
+        List<DatagramSocket> sockets=new ArrayList<>();ExecutorService responder=Executors.newSingleThreadExecutor();
+        try{
+            DatagramSocket first=new DatagramSocket(0,InetAddress.getByName("127.0.0.1"));sockets.add(first);int port=first.getLocalPort();String[] nodes=new String[12];nodes[0]="127.0.0.1";
+            for(int i=1;i<nodes.length;i++){nodes[i]="127.0.0."+(i+1);sockets.add(new DatagramSocket(port,InetAddress.getByName(nodes[i])));}
+            DatagramSocket working=sockets.get(sockets.size()-1);
+            Future<?> reply=responder.submit(()->{try{byte[] b=new byte[512];DatagramPacket p=new DatagramPacket(b,b.length);working.receive(p);byte[] q=Arrays.copyOf(b,p.getLength()),r=DnsPackets.failure(q);r[3]=(byte)0x80;working.send(new DatagramPacket(r,r.length,p.getSocketAddress()));}catch(IOException e){throw new RuntimeException(e);}});
+            try(DnsUpstream up=new DnsUpstream(PASS,nodes,port)){
+                try{up.resolve(DnsPackets.probe(40));fail("Silent nodes should exhaust first request");}catch(IOException expected){}
+                long began=System.nanoTime();byte[] q=DnsPackets.probe(41);assertTrue(DnsPackets.matches(q,up.resolve(q)));
+                assertTrue("Dead first nodes were retried instead of advancing",System.nanoTime()-began<4_000_000_000L);reply.get(1,TimeUnit.SECONDS);
+            }
+        }finally{for(DatagramSocket s:sockets)s.close();responder.shutdownNow();}
+    }
     @Test public void responseAndCancellationCloseSockets()throws Exception{
         try(DatagramSocket server=new DatagramSocket(0,InetAddress.getByName("127.0.0.1"))){
             DnsUpstream up=new DnsUpstream(PASS,new String[]{"127.0.0.1"},server.getLocalPort());
