@@ -24,7 +24,7 @@ final class DnsProfiles {
         @Override public String toString(){return name;}
     }
     static final Profile[] ALL={
-        new Profile("geohide","GeoHide","Доступ к выбранным зарубежным сайтам через Smart DNS.","dns.geohide.ru","https://dns.geohide.ru/dns-query","https://geohide.ru/",
+        new Profile("geohide","GeoHide","Доступ к выбранным зарубежным сайтам через Smart DNS.","dns.geohide.ru","https://dns.geohide.ru:8443/dns-query","https://geohide.ru/",
             new String[]{"193.233.112.68","193.233.112.67","193.233.112.88","45.155.204.190","37.230.192.51","46.8.158.6","159.194.200.33"},true,Transport.UDP),
         new Profile("dns_ai","DNS-AI · dns-ai.ru","AI-сервисы для РФ/Беларуси, фильтрация рекламы и трекеров. Только шифрованное подключение.","dns.dns-ai.ru","https://dns.dns-ai.ru/dns-query","https://dns-ai.ru/",
             new String[]{"194.87.196.13","45.151.102.219","2a00:b700:5::3:62","2a12:5940:d4ef::219"},false,Transport.DOT),
